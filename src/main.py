@@ -5,7 +5,9 @@ import os
 import argparse
 import logging
 import yaml
-from database.init_db import init_db
+import json
+from src.database.init_db import init_db
+from src.processors import DocumentProcessor
 
 def setup_logging(config):
     """Set up logging based on configuration."""
@@ -58,6 +60,9 @@ def parse_args():
                         help='Processing mode: bulk, incremental, or auto')
     parser.add_argument('--workers', type=int, help='Number of worker processes')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
+    parser.add_argument('--test', action='store_true', help='Run document processor test')
+    parser.add_argument('--file', help='Process a single file')
+    parser.add_argument('--directory', help='Process a directory')
 
     return parser.parse_args()
 
@@ -84,7 +89,61 @@ def main():
     logging.info("Database initialized")
 
     logging.info("Environment setup complete. Ready to process documents.")
-    # TODO: Implement document processing logic in future steps
+
+    # Initialize document processor
+    processor = DocumentProcessor(config)
+
+    # Process files based on command line arguments
+    if args.test:
+        # Run test on sample file
+        sample_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'sample.md')
+        logging.info(f"Running test with sample file: {sample_path}")
+
+        result = processor.process_file(sample_path)
+
+        # Print summary of processing result
+        print("\n--- Document Processing Test Results ---")
+        print(f"File: {result['file_path']}")
+        print(f"Status: {result['status']}")
+
+        if result['status'] == 'success':
+            print(f"Metadata:")
+            for key, value in result['metadata'].items():
+                # Skip long values
+                if isinstance(value, str) and len(value) > 100:
+                    print(f"  {key}: {value[:97]}...")
+                else:
+                    print(f"  {key}: {value}")
+
+            print(f"\nChunks created: {len(result['chunks'])}")
+            for i, chunk in enumerate(result['chunks']):
+                print(f"\nChunk {i+1}:")
+                print(f"  Section: {chunk['metadata'].get('section_title', 'N/A')}")
+                print(f"  Content (first 100 chars): {chunk['content'][:100]}...")
+
+        # Save full result to JSON for inspection
+        output_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'sample_result.json')
+        with open(output_path, 'w') as f:
+            json.dump(result, f, indent=2, default=str)
+
+        print(f"\nFull result saved to: {output_path}")
+
+    elif args.file:
+        # Process a single file
+        result = processor.process_file(args.file)
+        print(f"Processed file: {args.file} - Status: {result['status']}")
+
+    elif args.directory:
+        # Process a directory
+        results = processor.process_directory(args.directory)
+        print(f"Processed {len(results)} files in directory: {args.directory}")
+
+        # Print summary
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        error_count = sum(1 for r in results if r['status'] == 'error')
+        skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+
+        print(f"Success: {success_count}, Errors: {error_count}, Skipped: {skipped_count}")
 
 if __name__ == "__main__":
     main()

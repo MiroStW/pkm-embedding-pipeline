@@ -22,17 +22,29 @@ embedding:
   # Whether to enable title-enhanced embeddings
   enable_title_enhanced: true
 
-# Document Processing Configuration
-document_processing:
-  # Chunking settings
-  max_chunk_size: 1024
-  chunk_overlap: 100
-
-  # File types to process
-  file_extensions: [".md"]
+# Processing Configuration
+processing:
+  # Supported file extensions
+  supported_extensions: [".md", ".markdown"]
 
   # Files or directories to exclude
   exclude_patterns: ["node_modules", ".git", "venv"]
+
+# Chunking Configuration
+chunking:
+  # Chunking settings
+  max_chunk_size: 1024
+  chunk_overlap: 100
+  respect_structure: true
+  preserve_code_blocks: true
+  preserve_lists: true
+  preserve_tables: true
+
+# Metadata Configuration
+metadata:
+  extract_tags: true
+  extract_links: true
+  extract_keywords: false
 
 # Pipeline Configuration
 pipeline:
