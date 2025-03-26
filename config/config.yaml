@@ -1,0 +1,55 @@
+---
+# PKM Chatbot Embedding Pipeline Configuration
+
+# Database Configuration
+database:
+  tracking_db_path: "data/tracking.db"
+  vector_db:
+    provider: "pinecone"
+    api_key: "${PINECONE_API_KEY}"
+    environment: "${PINECONE_ENVIRONMENT}"
+    index_name: "${PINECONE_INDEX_NAME}"
+
+# Embedding Configuration
+embedding:
+  # Primary embedding model (OpenAI)
+  primary_model: "text-embedding-3-large"
+  primary_api_key: "${OPENAI_API_KEY}"
+
+  # Fallback embedding model (sentence-transformers)
+  fallback_model: "all-mpnet-base-v2"
+
+  # Whether to enable title-enhanced embeddings
+  enable_title_enhanced: true
+
+# Document Processing Configuration
+document_processing:
+  # Chunking settings
+  max_chunk_size: 1024
+  chunk_overlap: 100
+
+  # File types to process
+  file_extensions: [".md"]
+
+  # Files or directories to exclude
+  exclude_patterns: ["node_modules", ".git", "venv"]
+
+# Pipeline Configuration
+pipeline:
+  # Worker settings
+  max_workers: 4
+  auto_scale: true
+
+  # Processing mode
+  # "auto" will decide based on file count, "bulk" or "incremental" for explicit mode
+  processing_mode: "auto"
+  bulk_threshold: 20 # Number of files that triggers bulk mode
+
+  # Batch settings
+  batch_size: 10
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  log_file: "data/pipeline.log"
+  console_output: true
