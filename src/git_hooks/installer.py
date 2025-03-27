@@ -120,7 +120,7 @@ class GitHookInstaller:
             with open(hook_path, "r") as f:
                 content = f.read()
                 return "embedding pipeline" in content and "python -m src.git_hooks.trigger" in content
-        except:
+        except (IOError, OSError, FileNotFoundError):
             return False
 
 

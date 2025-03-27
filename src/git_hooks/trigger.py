@@ -18,13 +18,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from src.git_hooks.change_detector import GitChangeDetector
 from src.database.document_db import DocumentTracker  # Import the tracking database
 
+# Ensure logs directory exists
+log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+os.makedirs(log_dir, exist_ok=True)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs", "git_hooks.log"), mode="a")
+        logging.FileHandler(os.path.join(log_dir, "git_hooks.log"), mode="a")
     ]
 )
 logger = logging.getLogger("git_hooks.trigger")
