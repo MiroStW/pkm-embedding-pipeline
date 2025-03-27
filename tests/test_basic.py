@@ -23,23 +23,17 @@ def test_module_structure():
     try:
         model = EmbeddingModel()
         logger.error("EmbeddingModel should be abstract and not instantiable")
-        return False
+        assert False, "EmbeddingModel should be abstract and not instantiable"
     except TypeError:
         logger.info("EmbeddingModel is correctly abstract")
 
     # Verify SentenceTransformersEmbedding inherits from EmbeddingModel
-    if not issubclass(SentenceTransformersEmbedding, EmbeddingModel):
-        logger.error("SentenceTransformersEmbedding should inherit from EmbeddingModel")
-        return False
+    assert issubclass(SentenceTransformersEmbedding, EmbeddingModel), "SentenceTransformersEmbedding should inherit from EmbeddingModel"
     logger.info("SentenceTransformersEmbedding inherits correctly from EmbeddingModel")
 
     # Check factory class exists
-    if not hasattr(EmbeddingModelFactory, 'create_model'):
-        logger.error("EmbeddingModelFactory should have create_model method")
-        return False
+    assert hasattr(EmbeddingModelFactory, 'create_model'), "EmbeddingModelFactory should have create_model method"
     logger.info("EmbeddingModelFactory has correct create_model method")
-
-    return True
 
 def main():
     """Run all tests."""

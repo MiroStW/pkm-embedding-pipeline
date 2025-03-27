@@ -5,6 +5,7 @@ import os
 import sys
 import asyncio
 import logging
+import pytest
 
 # Add the src directory to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -18,6 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@pytest.mark.asyncio
 async def test_e5_embedding():
     """Test the E5 embedding model."""
     logger.info("Testing E5 embedding model...")
@@ -35,12 +37,14 @@ async def test_e5_embedding():
         text = "This is a test text for embedding generation."
         embedding = await model.generate_embedding(text)
         logger.info(f"Generated embedding with length: {len(embedding)}")
+        assert len(embedding) > 0, "Embedding should not be empty"
 
         # Test title-enhanced embedding
         title = "Test Title"
         content = "This is the content of the test document."
         enhanced_embedding = await model.generate_title_enhanced_embedding(title, content)
         logger.info(f"Generated title-enhanced embedding with length: {len(enhanced_embedding)}")
+        assert len(enhanced_embedding) > 0, "Enhanced embedding should not be empty"
 
         # Test batch embedding
         chunks = [
@@ -49,12 +53,13 @@ async def test_e5_embedding():
         ]
         processed_chunks = await model.batch_generate_embeddings(chunks)
         logger.info(f"Processed {len(processed_chunks)} chunks with embeddings")
+        assert len(processed_chunks) == len(chunks), "All chunks should be processed"
 
-        return True
     except Exception as e:
         logger.error(f"E5 embedding test failed: {str(e)}")
-        return False
+        pytest.fail(f"E5 embedding test failed: {str(e)}")
 
+@pytest.mark.asyncio
 async def test_distiluse_embedding():
     """Test the DistilUSE embedding model."""
     logger.info("Testing DistilUSE embedding model...")
@@ -71,12 +76,14 @@ async def test_distiluse_embedding():
         text = "This is a test text for embedding generation."
         embedding = await model.generate_embedding(text)
         logger.info(f"Generated embedding with length: {len(embedding)}")
+        assert len(embedding) > 0, "Embedding should not be empty"
 
         # Test title-enhanced embedding
         title = "Test Title"
         content = "This is the content of the test document."
         enhanced_embedding = await model.generate_title_enhanced_embedding(title, content)
         logger.info(f"Generated title-enhanced embedding with length: {len(enhanced_embedding)}")
+        assert len(enhanced_embedding) > 0, "Enhanced embedding should not be empty"
 
         # Test batch embedding
         chunks = [
@@ -85,12 +92,13 @@ async def test_distiluse_embedding():
         ]
         processed_chunks = await model.batch_generate_embeddings(chunks)
         logger.info(f"Processed {len(processed_chunks)} chunks with embeddings")
+        assert len(processed_chunks) == len(chunks), "All chunks should be processed"
 
-        return True
     except Exception as e:
         logger.error(f"DistilUSE embedding test failed: {str(e)}")
-        return False
+        pytest.fail(f"DistilUSE embedding test failed: {str(e)}")
 
+@pytest.mark.asyncio
 async def test_fallback_mechanism():
     """Test the fallback mechanism from E5 to DistilUSE."""
     logger.info("Testing fallback mechanism from E5 to DistilUSE...")
@@ -106,29 +114,33 @@ async def test_fallback_mechanism():
         model = await EmbeddingModelFactory.create_model(config)
         logger.info(f"Successfully created model with fallback: {model.__class__.__name__}")
         logger.info(f"Using model: {model.model_name}, is_fallback: {model.is_fallback}")
+        assert model.is_fallback, "Model should be using fallback"
 
         # Test single embedding to confirm it works
         text = "Testing fallback mechanism."
         embedding = await model.generate_embedding(text)
         logger.info(f"Generated embedding with fallback model, length: {len(embedding)}")
+        assert len(embedding) > 0, "Fallback embedding should not be empty"
 
-        return True
     except Exception as e:
         logger.error(f"Fallback test failed: {str(e)}")
-        return False
+        pytest.fail(f"Fallback test failed: {str(e)}")
 
 async def main():
     """Run all tests."""
     results = []
 
     # Test E5 embeddings
-    results.append(("E5 Embedding", await test_e5_embedding()))
+    e5_result = await test_e5_embedding()
+    results.append(("E5 Embedding", e5_result))
 
     # Test DistilUSE embeddings
-    results.append(("DistilUSE Embedding", await test_distiluse_embedding()))
+    distiluse_result = await test_distiluse_embedding()
+    results.append(("DistilUSE Embedding", distiluse_result))
 
     # Test fallback mechanism
-    results.append(("E5 to DistilUSE Fallback", await test_fallback_mechanism()))
+    fallback_result = await test_fallback_mechanism()
+    results.append(("E5 to DistilUSE Fallback", fallback_result))
 
     # Print summary
     logger.info("=== Test Results ===")

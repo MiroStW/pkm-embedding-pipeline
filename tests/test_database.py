@@ -6,7 +6,7 @@ import time
 import uuid
 import logging
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 import tempfile
 import os
 import shutil
@@ -74,7 +74,7 @@ class TestDatabase(unittest.TestCase):
             document_id=doc_id,
             filepath=filepath,
             title="Test Document",
-            last_modified=datetime.utcnow(),
+            last_modified=datetime.now(timezone.utc),
             status="pending",
             hash_value="initial_hash_value"
         )

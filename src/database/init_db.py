@@ -4,9 +4,9 @@ Database initialization module for tracking documents in the embedding pipeline.
 import os
 import yaml
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
+from datetime import timezone
 
 # Create base class for declarative models
 Base = declarative_base()
@@ -36,7 +36,7 @@ class ProcessingQueue(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     document_id = Column(String, nullable=False, index=True)
     priority = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(timezone.utc))
     processing_started = Column(DateTime)
     is_completed = Column(Boolean, default=False)
 

@@ -5,6 +5,7 @@ import os
 import sys
 import asyncio
 import logging
+import pytest
 
 # Add the src directory to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -19,6 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@pytest.mark.asyncio
 async def test_config_based_embedding():
     """Test creating and using embedding models from configuration."""
     logger.info("Testing configuration-based embedding model creation...")
@@ -46,6 +48,7 @@ async def test_config_based_embedding():
         embedding = await model.generate_embedding(test_text)
 
         logger.info(f"Generated embedding with length: {len(embedding)}")
+        assert len(embedding) > 0, "Embedding should not be empty"
 
         # Test title-enhanced embedding if enabled
         if embedding_config.get("enable_title_enhanced", True):
@@ -60,18 +63,19 @@ async def test_config_based_embedding():
             )
 
             logger.info(f"Generated title-enhanced embedding with length: {len(enhanced_embedding)}")
+            assert len(enhanced_embedding) > 0, "Enhanced embedding should not be empty"
 
-        return True
     except Exception as e:
         logger.error(f"Configuration-based embedding test failed: {str(e)}")
-        return False
+        pytest.fail(f"Configuration-based embedding test failed: {str(e)}")
 
 async def main():
     """Run all tests."""
     results = []
 
     # Test configuration-based embedding
-    results.append(("Configuration-based Embedding", await test_config_based_embedding()))
+    config_result = await test_config_based_embedding()
+    results.append(("Configuration-based Embedding", config_result))
 
     # Print summary
     logger.info("=== Test Results ===")

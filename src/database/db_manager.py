@@ -2,6 +2,7 @@
 Database manager module for tracking document states and managing work queue.
 """
 import datetime
+from datetime import timezone
 import logging
 import hashlib
 import os
@@ -139,7 +140,7 @@ class DatabaseManager:
                         id=document_id,
                         filepath=filepath,
                         title=title,
-                        last_modified=last_modified or datetime.datetime.utcnow(),
+                        last_modified=last_modified or datetime.datetime.now(timezone.utc),
                         status=status,
                         hash=hash_value
                     )
@@ -180,7 +181,7 @@ class DatabaseManager:
 
                 document.status = status
                 if status == 'completed' or status == 'error':
-                    document.last_processed = datetime.datetime.utcnow()
+                    document.last_processed = datetime.datetime.now(timezone.utc)
 
                 if error_message is not None:
                     document.error_message = error_message
@@ -289,7 +290,7 @@ class DatabaseManager:
                 queue_item = ProcessingQueue(
                     document_id=document_id,
                     priority=priority,
-                    created_at=datetime.datetime.utcnow()
+                    created_at=datetime.datetime.now(timezone.utc)
                 )
                 session.add(queue_item)
                 session.commit()
@@ -327,7 +328,7 @@ class DatabaseManager:
                 results = []
                 for item in queue_items:
                     # Mark as processing
-                    item.processing_started = datetime.datetime.utcnow()
+                    item.processing_started = datetime.datetime.now(timezone.utc)
                     results.append((item.id, item.document_id))
 
                     # Update document status
@@ -378,7 +379,7 @@ class DatabaseManager:
         Returns:
             Number of reset items
         """
-        threshold_time = datetime.datetime.utcnow() - datetime.timedelta(minutes=time_threshold_minutes)
+        threshold_time = datetime.datetime.now(timezone.utc) - datetime.timedelta(minutes=time_threshold_minutes)
 
         try:
             with self.get_session() as session:

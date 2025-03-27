@@ -5,6 +5,7 @@ import os
 import json
 import logging
 import datetime
+from datetime import timezone
 from typing import Dict, Any, Optional, List, Set
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class CheckpointManager:
                     'error_files': list(error_files) if error_files else [],
                     'processed_count': processed_count,
                     'error_count': error_count,
-                    'checkpoint_time': datetime.datetime.utcnow().isoformat()
+                    'checkpoint_time': datetime.datetime.now(timezone.utc).isoformat()
                 }
 
             # Create filename from process_id
@@ -208,7 +209,7 @@ class CheckpointManager:
             'processed_ids': processed_ids,
             'processed_count': len(processed_ids),
             'total_count': len(document_ids),
-            'start_time': datetime.datetime.utcnow().isoformat()
+            'start_time': datetime.datetime.now(timezone.utc).isoformat()
         }
 
         return self.save_checkpoint(process_id, state)
