@@ -14,7 +14,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 2. Install dependencies:
 
 ```bash
-pip install python-frontmatter markdown asyncio aiohttp pyyaml sentence-transformers pinecone-client sqlalchemy
+pip install -r requirements.txt
 ```
 
 3. Set up configuration:
@@ -31,6 +31,29 @@ cp config/config.example.yaml config/config.yaml
 ```bash
 python -m src.main
 ```
+
+### Pinecone Integration
+
+The system supports Pinecone as a vector database. To test and verify your Pinecone integration:
+
+1. Set up environment variables (create a `.env` file in the root directory):
+
+```
+PINECONE_API_KEY=your_api_key
+PINECONE_INDEX_NAME=your_index_name
+PINECONE_ENVIRONMENT=gcp-starter  # For free tier
+```
+
+2. Run the verification script:
+
+```bash
+python scripts/pinecone/run_verification.py
+```
+
+For more detailed information about Pinecone integration:
+
+- See [scripts/pinecone/README.md](scripts/pinecone/README.md) for available scripts
+- See [tests/pinecone/README.md](tests/pinecone/README.md) for tests
 
 ### Installing Git Hooks
 
@@ -77,6 +100,17 @@ python -m src.git_hooks.cli list-files
 python -m unittest discover tests
 ```
 
+### Testing Pinecone Integration
+
+```bash
+# Run the pytest-compatible tests
+python -m pytest tests/pinecone/test_pytest_pinecone.py -v
+
+# Run standalone test scripts
+python tests/pinecone/test_pinecone_client.py
+python tests/pinecone/test_direct_connection.py
+```
+
 ### Testing Git Hooks Specifically
 
 ```bash
@@ -96,11 +130,17 @@ tests/scripts/test_git_hooks.sh
 embedding-pipeline/
 ├── config/              # Configuration files
 ├── data/                # Data storage (database, logs)
+├── docs/                # Documentation
+├── logs/                # Log files
+├── scripts/             # Utility scripts
+│   └── pinecone/        # Pinecone-related scripts
 ├── src/                 # Source code
 │   ├── database/        # Database-related code
 │   ├── models/          # Embedding models
 │   ├── processors/      # Document processing logic
 │   └── main.py          # Main entry point
+├── tests/               # Test code
+│   └── pinecone/        # Pinecone integration tests
 ├── venv/                # Virtual environment
 └── README.md            # This file
 ```
@@ -117,9 +157,3 @@ embedding-pipeline/
 ## Implementation Status
 
 This project is currently in development. See `instructions/` directory for implementation plan and details.
-
-# Additional content
-
-# Modified for testing
-
-# Modified for testing

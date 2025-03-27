@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from src.database.vector_db import VectorDatabaseUploader
+from src.database.pinecone_client import PineconeClient
 from src.database.mock_vector_db import MockVectorDatabaseUploader
 
 logger = logging.getLogger(__name__)
@@ -38,17 +39,21 @@ def create_vector_db_uploader(config: Dict[str, Any]) -> Optional[Any]:
             return None
 
         try:
-            return VectorDatabaseUploader(
+            # Use enhanced PineconeClient instead of basic VectorDatabaseUploader
+            return PineconeClient(
                 api_key=api_key,
                 environment=environment,
                 index_name=index_name,
                 dimension=dimension,
                 max_retries=vector_config.get("max_retries", 3),
                 retry_delay=vector_config.get("retry_delay", 2.0),
-                batch_size=vector_config.get("batch_size", 100)
+                batch_size=vector_config.get("batch_size", 100),
+                serverless=vector_config.get("serverless", False),
+                cloud_provider=vector_config.get("cloud_provider", "aws"),
+                region=vector_config.get("region", "us-west-2")
             )
         except Exception as e:
-            logger.error(f"Failed to create Pinecone uploader: {str(e)}")
+            logger.error(f"Failed to create Pinecone client: {str(e)}")
             return None
 
     elif provider == "mock":

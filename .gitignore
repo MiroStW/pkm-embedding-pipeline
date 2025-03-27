@@ -43,7 +43,6 @@ pipeline_trigger
 
 # Environment variables
 .env
-.env.*
 
 # Project specific
 *.pickle

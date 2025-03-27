@@ -10,6 +10,14 @@ database:
     api_key: "${PINECONE_API_KEY}"
     environment: "${PINECONE_ENVIRONMENT}"
     index_name: "${PINECONE_INDEX_NAME}"
+    dimension: 1024
+    max_retries: 3
+    retry_delay: 2.0
+    batch_size: 100
+    # Serverless configuration (optional)
+    serverless: false
+    cloud_provider: "aws" # aws, gcp, azure
+    region: "us-west-2" # Region for serverless deployment
 
 # Embedding Configuration
 embedding:

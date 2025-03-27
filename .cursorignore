@@ -41,7 +41,6 @@ data/
 
 # Environment variables
 .env
-.env.*
 
 # Project specific
 *.pickle
