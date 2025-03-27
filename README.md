@@ -1,6 +1,87 @@
 # PKM Chatbot Embedding Pipeline
 
-This project implements an embedding pipeline for a Personal Knowledge Management (PKM) chatbot. It processes markdown files, generates vector embeddings, and synchronizes them with a cloud vector database (Pinecone).
+A pipeline for processing markdown files, generating embeddings, and synchronizing them with a vector database for use in a personal knowledge management (PKM) chatbot.
+
+## Installation
+
+1. Create a virtual environment:
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+2. Install dependencies:
+
+```bash
+pip install python-frontmatter markdown asyncio aiohttp pyyaml sentence-transformers pinecone-client sqlalchemy
+```
+
+3. Set up configuration:
+
+```bash
+cp config/config.example.yaml config/config.yaml
+# Edit config/config.yaml to match your environment
+```
+
+## Usage
+
+### Basic Usage
+
+```bash
+python -m src.main
+```
+
+### Installing Git Hooks
+
+The embedding pipeline can be integrated with Git to automatically process changes when commits are made or files are merged:
+
+```bash
+python -m src.git_hooks.cli install
+```
+
+This will install the following Git hooks:
+
+- `post-commit`: Triggered after each commit to identify changed files
+- `post-merge`: Triggered after merges or pulls to identify changes from remote
+
+### Git Hooks Status
+
+Check the status of installed Git hooks:
+
+```bash
+python -m src.git_hooks.cli status
+```
+
+### List All Markdown Files
+
+List all markdown files tracked by Git:
+
+```bash
+python -m src.git_hooks.cli list-files
+```
+
+## Components
+
+1. **Document Processor**: Parses markdown files and extracts chunks and metadata
+2. **Embedding Model**: Generates vector embeddings from text chunks
+3. **Git Integration**: Tracks file changes using Git hooks
+4. **Database**: Tracks document processing status and manages work queue
+5. **Pinecone Integration**: Synchronizes vectors with the Pinecone vector database
+
+## Development
+
+### Running Tests
+
+```bash
+python -m unittest discover tests
+```
+
+### Testing Git Hooks Specifically
+
+```bash
+python -m unittest tests.test_git_hooks
+```
 
 ## Project Structure
 
@@ -16,42 +97,6 @@ embedding-pipeline/
 ├── venv/                # Virtual environment
 └── README.md            # This file
 ```
-
-## Setup
-
-1. Create and activate a virtual environment:
-
-   ```
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-2. Install dependencies:
-
-   ```
-   pip install python-frontmatter markdown asyncio aiohttp pyyaml sentence-transformers torch pinecone sqlalchemy
-   ```
-
-3. Set up environment variables or edit the config file:
-   ```
-   export PINECONE_API_KEY="your-pinecone-api-key"
-   export PINECONE_ENVIRONMENT="your-pinecone-environment"
-   export PINECONE_INDEX_NAME="your-index-name"
-   ```
-
-## Usage
-
-Run the pipeline with:
-
-```
-python src/main.py
-```
-
-Additional options:
-
-- `--mode [bulk|incremental|auto]`: Processing mode
-- `--workers N`: Number of worker processes
-- `--verbose`: Enable verbose logging
 
 ## Features
 
