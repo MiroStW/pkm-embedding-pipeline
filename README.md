@@ -110,3 +110,4 @@ embedding-pipeline/
 ## Implementation Status
 
 This project is currently in development. See `instructions/` directory for implementation plan and details.
+# Additional content
