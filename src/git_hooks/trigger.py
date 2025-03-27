@@ -15,9 +15,6 @@ from typing import List, Dict
 # Add the parent directory to the path so we can import the embedding pipeline modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.git_hooks.change_detector import GitChangeDetector
-from src.database.document_db import DocumentTracker  # Import the tracking database
-
 # Ensure logs directory exists
 log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
 os.makedirs(log_dir, exist_ok=True)
@@ -33,6 +30,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("git_hooks.trigger")
 
+# Import the change detector
+from src.git_hooks.change_detector import GitChangeDetector
+
+# Try to import the document tracker
+try:
+    from src.database.document_db import DocumentTracker
+    has_tracker = True
+except ImportError:
+    logger.warning("DocumentTracker not available. File changes will be logged but not tracked in database.")
+    has_tracker = False
+
 def process_changes(hook_type: str, repo_path: str = None) -> Dict[str, List[str]]:
     """
     Process changes detected by the git hook.
@@ -45,7 +53,9 @@ def process_changes(hook_type: str, repo_path: str = None) -> Dict[str, List[str
         Dictionary with keys 'added', 'modified', and 'deleted', each containing a list of file paths.
     """
     detector = GitChangeDetector(repo_path)
-    tracker = DocumentTracker()  # Initialize the tracking database
+
+    # Initialize tracker if available
+    tracker = DocumentTracker() if has_tracker else None
 
     # Detect changes based on the hook type
     if hook_type == "post-commit":
@@ -64,16 +74,21 @@ def process_changes(hook_type: str, repo_path: str = None) -> Dict[str, List[str
             for file in files:
                 logger.info(f"    - {file}")
 
-    # Update the document tracking database
-    if changes['added'] or changes['modified']:
-        # Mark added and modified files for processing
-        for file_path in changes['added'] + changes['modified']:
-            tracker.mark_for_processing(file_path)
+    # Update the document tracking database if available
+    if tracker:
+        if changes['added'] or changes['modified']:
+            # Mark added and modified files for processing
+            for file_path in changes['added'] + changes['modified']:
+                tracker.mark_for_processing(file_path)
+                logger.info(f"Marked for processing: {file_path}")
 
-    if changes['deleted']:
-        # Mark deleted files for deletion in the vector database
-        for file_path in changes['deleted']:
-            tracker.mark_for_deletion(file_path)
+        if changes['deleted']:
+            # Mark deleted files for deletion in the vector database
+            for file_path in changes['deleted']:
+                tracker.mark_for_deletion(file_path)
+                logger.info(f"Marked for deletion: {file_path}")
+    else:
+        logger.info("Changes detected but not tracked in database (DocumentTracker not available)")
 
     return changes
 
@@ -89,15 +104,10 @@ def main():
         changes = process_changes(args.hook_type, args.repo_path)
 
         # If changes were detected, we should signal that the pipeline needs to run
-        # This could be done by writing to a file, sending a signal, etc.
         if any(changes.values()):
             # This is a placeholder, in a real implementation you might want to
             # trigger the pipeline to run right away or notify a daemon
             logger.info("Changes detected, pipeline needs to run")
-
-            # Create logs directory if it doesn't exist
-            log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
-            os.makedirs(log_dir, exist_ok=True)
 
             # Write a flag file to indicate that the pipeline needs to run
             with open(os.path.join(log_dir, "pipeline_trigger"), "w") as f:
