@@ -49,7 +49,7 @@ class VectorDatabaseUploader:
     def _init_connection(self) -> None:
         """Initialize connection to Pinecone."""
         try:
-            # Initialize pinecone with v6.x API
+            # Initialize Pinecone with the latest API (v6.x)
             self.pc = Pinecone(api_key=self.api_key)
 
             # Check if index exists
@@ -57,7 +57,7 @@ class VectorDatabaseUploader:
             if self.index_name not in existing_indexes:
                 logger.info(f"Creating Pinecone index '{self.index_name}' with dimension {self.dimension}")
 
-                # Create the index
+                # Create the index with appropriate specs
                 self.pc.create_index(
                     name=self.index_name,
                     dimension=self.dimension,
@@ -69,7 +69,7 @@ class VectorDatabaseUploader:
                 )
 
                 # Wait for index to be ready
-                while not self.index_name in self.pc.list_indexes().names():
+                while self.index_name not in self.pc.list_indexes().names():
                     logger.info("Waiting for index to be created...")
                     time.sleep(1)
 
@@ -232,41 +232,21 @@ class VectorDatabaseUploader:
             True if deletion was successful, False otherwise
         """
         try:
-            # Free tier doesn't support filter-based deletion.
-            # First, we need to find all vector IDs associated with this document.
+            # Using filter metadata to delete all vectors for this document
             if self.index is None:
                 self._init_connection()
 
-            # Get a dummy vector to use for searching
-            dummy_vector = [0.1] * self.dimension
-
-            # Query for vectors with this document_id in metadata
-            # For the free tier, we need to scan all vectors and filter client-side
-            results = self._with_retry(
-                self.index.query,
-                vector=dummy_vector,
-                top_k=100,  # Adjust based on expected document size (chunks per document)
-                include_metadata=True
+            # Delete the vectors with prefix matching
+            self._with_retry(
+                self.index.delete,
+                filter={"document_id": {"$eq": document_id}}
             )
-
-            vector_ids = []
-            for match in results.get('matches', []):
-                metadata = match.get('metadata', {})
-                if metadata.get('document_id') == document_id:
-                    vector_ids.append(match.get('id'))
-
-            if not vector_ids:
-                logger.warning(f"No vectors found for document {document_id}")
-                return False
-
-            logger.info(f"Deleting {len(vector_ids)} vectors for document {document_id}")
-            self._with_retry(self.index.delete, ids=vector_ids)
 
             logger.info(f"Deleted all vectors for document {document_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to delete vectors for document {document_id}: {str(e)}")
+            logger.error(f"Error deleting document {document_id}: {str(e)}")
             return False
 
     def get_stats(self) -> Dict[str, Any]:

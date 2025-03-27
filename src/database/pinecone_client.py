@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from typing import List, Dict, Any, Optional, Tuple, Union
-from pinecone import Pinecone, PodSpec, ServerlessSpec
+from pinecone import Pinecone, ServerlessSpec, PodSpec
 
 from src.database.vector_db import VectorDatabaseUploader
 
@@ -44,24 +44,26 @@ class PineconeClient(VectorDatabaseUploader):
             cloud_provider: Cloud provider for serverless (aws, gcp, azure)
             region: Region for serverless deployment
         """
-        super().__init__(
-            api_key=api_key,
-            environment=environment,
-            index_name=index_name,
-            dimension=dimension,
-            max_retries=max_retries,
-            retry_delay=retry_delay,
-            batch_size=batch_size
-        )
-
+        self.api_key = api_key
+        self.environment = environment
+        self.index_name = index_name
+        self.dimension = dimension
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.batch_size = batch_size
         self.serverless = serverless
         self.cloud_provider = cloud_provider
         self.region = region
+        self.pc = None
+        self.index = None
+
+        # Initialize connection
+        self._init_connection()
 
     def _init_connection(self) -> None:
         """Initialize connection to Pinecone with enhanced options."""
         try:
-            # Initialize Pinecone client with v6.x API
+            # Initialize Pinecone client with the latest API (v6.x)
             self.pc = Pinecone(api_key=self.api_key)
 
             # Check if index exists
@@ -94,7 +96,7 @@ class PineconeClient(VectorDatabaseUploader):
                     )
 
                 # Wait for index to be ready
-                while not self.index_name in self.pc.list_indexes().names():
+                while self.index_name not in self.pc.list_indexes().names():
                     logger.info("Waiting for index to be created...")
                     time.sleep(1)
 
@@ -242,11 +244,68 @@ class PineconeClient(VectorDatabaseUploader):
             Total vector count or 0 if error
         """
         try:
-            stats = self.get_stats()
-            return stats.get('totalVectorCount', 0)
+            if self.index is None:
+                self._init_connection()
+
+            stats = self.index.describe_index_stats()
+            return stats.get('total_vector_count', 0)
         except Exception as e:
             logger.error(f"Error getting vector count: {str(e)}")
             return 0
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get index statistics.
+
+        Returns:
+            Dictionary with index statistics
+        """
+        try:
+            if self.index is None:
+                self._init_connection()
+
+            return self.index.describe_index_stats()
+        except Exception as e:
+            logger.error(f"Error getting index statistics: {str(e)}")
+            return {"error": str(e)}
+
+    def _with_retry(self, operation: callable, *args, **kwargs) -> Any:
+        """
+        Execute an operation with retry logic.
+
+        Args:
+            operation: Function to execute
+            args: Positional arguments for the function
+            kwargs: Keyword arguments for the function
+
+        Returns:
+            Result from the operation
+
+        Raises:
+            Exception: If all retries fail
+        """
+        last_exception = None
+
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                return operation(*args, **kwargs)
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"Attempt {attempt}/{self.max_retries} failed: {str(e)}")
+
+                if attempt < self.max_retries:
+                    # Calculate backoff delay with jitter
+                    delay = self.retry_delay * (1.5 ** (attempt - 1))
+                    logger.info(f"Retrying in {delay:.2f} seconds...")
+                    time.sleep(delay)
+
+                    # Recreate connection if needed
+                    if self.index is None:
+                        self._init_connection()
+
+        # If we get here, all retries failed
+        logger.error(f"All retry attempts failed: {str(last_exception)}")
+        raise last_exception
 
     def get_document_ids(self) -> List[str]:
         """

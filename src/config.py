@@ -1,12 +1,110 @@
 """
-Configuration loading and management for the embedding pipeline.
+Configuration utilities for loading and managing application configuration.
 """
 import os
+import re
 import yaml
 import logging
 from typing import Dict, Any, Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Regex for finding environment variable references in the format ${VAR_NAME}
+ENV_VAR_PATTERN = re.compile(r'\${([^}]+)}')
+
+def substitute_env_vars(value: str) -> str:
+    """
+    Replace environment variable references in the string with their values.
+
+    Args:
+        value: String that may contain environment variable references.
+
+    Returns:
+        String with environment variables replaced with their values.
+    """
+    def replace_env_var(match):
+        env_var_name = match.group(1)
+        env_var_value = os.environ.get(env_var_name)
+
+        if env_var_value is None:
+            logger.warning(f"Environment variable '{env_var_name}' not found")
+            return match.group(0)  # Return the original placeholder if variable not found
+
+        logger.debug(f"Substituted environment variable: {env_var_name}")
+        return env_var_value
+
+    # Replace all environment variable references
+    if isinstance(value, str):
+        return ENV_VAR_PATTERN.sub(replace_env_var, value)
+    return value
+
+def process_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Process configuration dictionary, substituting environment variables.
+
+    Args:
+        config: Configuration dictionary.
+
+    Returns:
+        Processed configuration dictionary.
+    """
+    result = {}
+
+    for key, value in config.items():
+        if isinstance(value, dict):
+            # Recursively process nested dictionaries
+            result[key] = process_config_dict(value)
+        elif isinstance(value, list):
+            # Process lists
+            result[key] = [
+                process_config_dict(item) if isinstance(item, dict)
+                else substitute_env_vars(item) if isinstance(item, str)
+                else item
+                for item in value
+            ]
+        elif isinstance(value, str):
+            # Substitute environment variables in strings
+            result[key] = substitute_env_vars(value)
+        else:
+            # Keep other types as is
+            result[key] = value
+
+    return result
+
+def load_config(config_path: str = None) -> Dict[str, Any]:
+    """
+    Load configuration from YAML file.
+
+    Args:
+        config_path: Path to configuration file. If None, uses default path.
+
+    Returns:
+        Configuration dictionary.
+    """
+    if not config_path:
+        # Use default path relative to the project root
+        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'config.yaml')
+
+    logger.info(f"Loading configuration from {config_path}")
+
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        # Process configuration
+        processed_config = process_config_dict(config)
+
+        # Debug info
+        logger.debug("Configuration loaded successfully")
+        return processed_config
+
+    except Exception as e:
+        logger.error(f"Error loading configuration: {str(e)}")
+        return {}
 
 class ConfigManager:
     """
@@ -61,6 +159,7 @@ class ConfigManager:
                 env_value = os.environ.get(env_var)
                 if env_value is not None:
                     config_dict[key] = env_value
+                    logger.debug(f"Applied environment variable {env_var} to config key {key}")
                 else:
                     logger.warning(f"Environment variable {env_var} not found")
 

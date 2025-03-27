@@ -40,7 +40,7 @@ class PipelineOrchestrator:
         self.document_db = DocumentTracker(config.get('database', {}).get('tracking_db_path'))
 
         # Use factory to create vector DB uploader
-        self.vector_db = create_vector_db_uploader(config.get('database', {}))
+        self.vector_db = create_vector_db_uploader(config)
         if self.vector_db is None:
             self.logger.warning("Vector database is not configured correctly, using mock implementation")
             from src.database.mock_vector_db import MockVectorDatabaseUploader

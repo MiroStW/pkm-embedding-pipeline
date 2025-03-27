@@ -28,6 +28,44 @@ class CheckpointManager:
         self.checkpoint_dir = checkpoint_dir
         os.makedirs(checkpoint_dir, exist_ok=True)
 
+    def get_latest_checkpoint(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent checkpoint.
+
+        Returns:
+            The most recent checkpoint state dictionary, or None if no checkpoints exist
+        """
+        try:
+            checkpoints = self.list_checkpoints()
+
+            if not checkpoints:
+                logger.debug("No checkpoints found")
+                return None
+
+            # The list_checkpoints method already sorts by modified time (newest first)
+            latest = checkpoints[0]
+
+            # Load the actual checkpoint data
+            checkpoint_path = os.path.join(self.checkpoint_dir, f"{latest['process_id']}.checkpoint.json")
+
+            if not os.path.exists(checkpoint_path):
+                logger.warning(f"Checkpoint file not found: {checkpoint_path}")
+                return None
+
+            with open(checkpoint_path, 'r') as f:
+                checkpoint_data = json.load(f)
+
+            # Add timestamp for easier access
+            checkpoint_data['timestamp'] = datetime.datetime.fromisoformat(
+                latest['modified_time'].replace('Z', '+00:00')
+            ).timestamp()
+
+            return checkpoint_data
+
+        except Exception as e:
+            logger.error(f"Error getting latest checkpoint: {str(e)}")
+            return None
+
     def save_checkpoint(self,
                        process_id: str = DEFAULT_PROCESS_ID,
                        state: Dict[str, Any] = None,
