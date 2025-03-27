@@ -12,15 +12,21 @@ database:
 
 # Embedding Configuration
 embedding:
-  # Primary embedding model (OpenAI)
-  primary_model: "text-embedding-3-large"
-  primary_api_key: "${OPENAI_API_KEY}"
+  # Model type: "e5" (primary) or "distiluse" (fallback)
+  model_type: "e5"
 
-  # Fallback embedding model (sentence-transformers)
-  fallback_model: "all-mpnet-base-v2"
+  # Primary embedding model (E5)
+  primary_model: "intfloat/multilingual-e5-large-instruct"
 
-  # Whether to enable title-enhanced embeddings
+  # Fallback embedding model (DistilUSE)
+  fallback_model: "sentence-transformers/distiluse-base-multilingual-cased-v2"
+
+  # Hardware optimization
+  device: "mps" # "mps" for M2 Max, "cuda" for NVIDIA GPUs, "cpu" for CPU
+
+  # Title-enhanced embedding settings
   enable_title_enhanced: true
+  title_weight: 0.3 # Weight applied to title embeddings (0-1)
 
 # Processing Configuration
 processing:

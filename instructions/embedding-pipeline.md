@@ -41,9 +41,15 @@ This document outlines the technical implementation decisions for the local embe
 
 #### Model Selection
 
-- **Primary Model**: `text-embedding-3-large` from OpenAI or equivalent high-quality model
-- **Fallback Model**: `all-mpnet-base-v2` from sentence-transformers
-- **Rationale**: Prioritizing embedding quality over processing speed, as this is a personal system with moderate data volume. Model can be easily replaced as technology evolves.
+- **Primary Model**: `intfloat/multilingual-e5-large-instruct` for high-quality multilingual embeddings
+- **Fallback Model**: `sentence-transformers/distiluse-base-multilingual-cased-v2` for efficient processing
+- **Hardware Optimization**: Leveraging M2 Max Neural Engine through PyTorch MPS acceleration
+- **Rationale**:
+  - Primary model offers superior semantic understanding with instruction-tuning capability
+  - Strong performance for mixed English (80%) and German (20%) content
+  - Hardware capabilities (M2 Max, 32GB RAM) support efficient processing of larger model
+  - Fallback model provides faster processing option when needed
+  - Both models integrate well with sentence-transformers library
 
 #### Embedding Strategy
 

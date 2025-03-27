@@ -4,7 +4,7 @@ This document describes the embedding model components of the PKM chatbot embedd
 
 ## Overview
 
-The embedding model components are responsible for generating vector embeddings for document chunks. The system supports multiple embedding models and includes a fallback mechanism for reliability.
+The embedding model components are responsible for generating vector embeddings for document chunks. The system uses state-of-the-art multilingual models with a fallback mechanism for reliability.
 
 ## Components
 
@@ -17,33 +17,33 @@ The base interface that all embedding models implement, with these key methods:
 - `generate_title_enhanced_embedding(title, content)`: Generate embedding that combines title and content
 - `batch_generate_embeddings(chunks)`: Process a batch of document chunks
 
-### `OpenAIEmbedding`
-
-Primary embedding model that uses OpenAI's API:
-
-- Uses `text-embedding-3-small` by default (configurable)
-- Includes rate limiting to respect OpenAI's API limits
-- Normalizes embeddings to unit length
-- Handles errors gracefully
-- Implements title-enhanced embeddings with configurable weighting
-
 ### `SentenceTransformersEmbedding`
 
-Fallback embedding model that uses local sentence-transformers models:
+Flexible embedding model implementation that supports both primary and fallback models:
 
-- Uses `all-MiniLM-L6-v2` by default (configurable)
-- Runs CPU-intensive operations in thread pool to avoid blocking async loop
-- Normalizes embeddings to unit length
-- Handles errors gracefully
+#### Primary Model (E5)
+
+- Uses `intfloat/multilingual-e5-large-instruct` by default
+- Optimized for high-quality multilingual embeddings
+- Configured for M2 Max Neural Engine through PyTorch MPS
+- Handles instruction-tuned model requirements
 - Implements title-enhanced embeddings with configurable weighting
+
+#### Fallback Model (DistilUSE)
+
+- Uses `sentence-transformers/distiluse-base-multilingual-cased-v2`
+- Provides efficient processing with lower resource requirements
+- Maintains multilingual support
+- Shares same interface and features as primary model
 
 ### `EmbeddingModelFactory`
 
 Factory class for creating embedding models:
 
 - Creates the appropriate model based on configuration
-- Implements fallback mechanism from OpenAI to sentence-transformers
-- Handles initialization errors gracefully
+- Implements fallback mechanism from E5 to DistilUSE
+- Handles hardware optimization and device selection
+- Manages initialization errors gracefully
 
 ## Usage
 
@@ -52,10 +52,10 @@ from src.models import EmbeddingModelFactory
 
 # Configuration
 config = {
-    "model_type": "openai",  # or "sentence-transformers"
-    "openai_api_key": "your-api-key",  # optional, can use env var
-    "openai_model": "text-embedding-3-small",  # optional
-    "sentence_transformers_model": "all-MiniLM-L6-v2"  # optional
+    "model_type": "e5",  # or "distiluse"
+    "e5_model": "intfloat/multilingual-e5-large-instruct",  # optional
+    "distiluse_model": "sentence-transformers/distiluse-base-multilingual-cased-v2",  # optional
+    "device": "mps"  # optional, auto-detected if not specified
 }
 
 # Create embedding model
@@ -82,3 +82,13 @@ The embedding models support title-enhanced embeddings, which combine the embedd
 4. Normalize the combined embedding
 
 This approach improves retrieval quality by incorporating the semantic meaning of both the title and content.
+
+## Hardware Optimization
+
+The implementation automatically detects and utilizes available hardware:
+
+1. M2 Max Neural Engine (MPS) - Primary choice for Apple Silicon
+2. CUDA - Used when available on systems with NVIDIA GPUs
+3. CPU - Fallback for other systems
+
+The device can be manually specified in the configuration if needed.

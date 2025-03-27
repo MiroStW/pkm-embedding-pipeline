@@ -29,12 +29,11 @@ embedding-pipeline/
 2. Install dependencies:
 
    ```
-   pip install python-frontmatter markdown asyncio aiohttp pyyaml sentence-transformers openai pinecone sqlalchemy
+   pip install python-frontmatter markdown asyncio aiohttp pyyaml sentence-transformers torch pinecone sqlalchemy
    ```
 
 3. Set up environment variables or edit the config file:
    ```
-   export OPENAI_API_KEY="your-api-key"
    export PINECONE_API_KEY="your-pinecone-api-key"
    export PINECONE_ENVIRONMENT="your-pinecone-environment"
    export PINECONE_INDEX_NAME="your-index-name"
@@ -58,7 +57,7 @@ Additional options:
 
 - Processes markdown files with frontmatter metadata
 - Implements semantic chunking
-- Generates embeddings using OpenAI or sentence-transformers
+- Generates embeddings using multilingual transformer models
 - Tracks document states in SQLite database
 - Supports bulk and incremental processing modes
 - Integrates with Pinecone vector database

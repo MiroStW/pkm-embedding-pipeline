@@ -18,13 +18,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def test_openai_embedding():
-    """Test the OpenAI embedding model."""
-    logger.info("Testing OpenAI embedding model...")
+async def test_e5_embedding():
+    """Test the E5 embedding model."""
+    logger.info("Testing E5 embedding model...")
 
     config = {
-        "model_type": "openai",
-        "openai_model": "text-embedding-3-small"
+        "model_type": "e5",
+        "e5_model": "intfloat/multilingual-e5-large-instruct",
+        "device": "mps"  # For M2 Max optimization
     }
 
     try:
@@ -51,16 +52,16 @@ async def test_openai_embedding():
 
         return True
     except Exception as e:
-        logger.error(f"OpenAI embedding test failed: {str(e)}")
+        logger.error(f"E5 embedding test failed: {str(e)}")
         return False
 
-async def test_sentence_transformers_embedding():
-    """Test the Sentence Transformers embedding model."""
-    logger.info("Testing Sentence Transformers embedding model...")
+async def test_distiluse_embedding():
+    """Test the DistilUSE embedding model."""
+    logger.info("Testing DistilUSE embedding model...")
 
     config = {
-        "model_type": "sentence-transformers",
-        "sentence_transformers_model": "all-MiniLM-L6-v2"
+        "model_type": "distiluse",
+        "device": "mps"  # For M2 Max optimization
     }
 
     try:
@@ -87,26 +88,24 @@ async def test_sentence_transformers_embedding():
 
         return True
     except Exception as e:
-        logger.error(f"Sentence Transformers embedding test failed: {str(e)}")
+        logger.error(f"DistilUSE embedding test failed: {str(e)}")
         return False
 
 async def test_fallback_mechanism():
-    """Test the fallback mechanism from OpenAI to Sentence Transformers."""
-    logger.info("Testing fallback mechanism...")
-
-    # Temporarily save the API key
-    original_api_key = os.environ.get("OPENAI_API_KEY")
+    """Test the fallback mechanism from E5 to DistilUSE."""
+    logger.info("Testing fallback mechanism from E5 to DistilUSE...")
 
     try:
-        # Set invalid API key to force fallback
-        os.environ["OPENAI_API_KEY"] = "invalid_key"
-
+        # Create a config with a non-existent E5 model to force fallback
         config = {
-            "model_type": "openai",  # Should fallback to sentence-transformers
+            "model_type": "e5",
+            "e5_model": "intfloat/non-existent-model",  # Invalid model to force fallback
+            "device": "mps"
         }
 
         model = await EmbeddingModelFactory.create_model(config)
         logger.info(f"Successfully created model with fallback: {model.__class__.__name__}")
+        logger.info(f"Using model: {model.model_name}, is_fallback: {model.is_fallback}")
 
         # Test single embedding to confirm it works
         text = "Testing fallback mechanism."
@@ -117,31 +116,19 @@ async def test_fallback_mechanism():
     except Exception as e:
         logger.error(f"Fallback test failed: {str(e)}")
         return False
-    finally:
-        # Restore original API key
-        if original_api_key:
-            os.environ["OPENAI_API_KEY"] = original_api_key
-        elif "OPENAI_API_KEY" in os.environ:
-            del os.environ["OPENAI_API_KEY"]
 
 async def main():
     """Run all tests."""
     results = []
 
-    # Test OpenAI embeddings if API key is set
-    if os.environ.get("OPENAI_API_KEY"):
-        results.append(("OpenAI Embedding", await test_openai_embedding()))
-    else:
-        logger.warning("Skipping OpenAI embedding test: No API key set")
+    # Test E5 embeddings
+    results.append(("E5 Embedding", await test_e5_embedding()))
 
-    # Test Sentence Transformers embeddings
-    results.append(("Sentence Transformers Embedding", await test_sentence_transformers_embedding()))
+    # Test DistilUSE embeddings
+    results.append(("DistilUSE Embedding", await test_distiluse_embedding()))
 
-    # Test fallback mechanism if API key is set
-    if os.environ.get("OPENAI_API_KEY"):
-        results.append(("Fallback Mechanism", await test_fallback_mechanism()))
-    else:
-        logger.warning("Skipping fallback test: No API key set")
+    # Test fallback mechanism
+    results.append(("E5 to DistilUSE Fallback", await test_fallback_mechanism()))
 
     # Print summary
     logger.info("=== Test Results ===")

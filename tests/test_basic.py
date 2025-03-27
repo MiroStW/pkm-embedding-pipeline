@@ -8,7 +8,7 @@ import logging
 # Add the src directory to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.models import EmbeddingModel, OpenAIEmbedding, SentenceTransformersEmbedding, EmbeddingModelFactory
+from src.models import EmbeddingModel, SentenceTransformersEmbedding, EmbeddingModelFactory
 
 # Configure logging
 logging.basicConfig(
@@ -26,12 +26,6 @@ def test_module_structure():
         return False
     except TypeError:
         logger.info("EmbeddingModel is correctly abstract")
-
-    # Verify OpenAIEmbedding inherits from EmbeddingModel
-    if not issubclass(OpenAIEmbedding, EmbeddingModel):
-        logger.error("OpenAIEmbedding should inherit from EmbeddingModel")
-        return False
-    logger.info("OpenAIEmbedding inherits correctly from EmbeddingModel")
 
     # Verify SentenceTransformersEmbedding inherits from EmbeddingModel
     if not issubclass(SentenceTransformersEmbedding, EmbeddingModel):

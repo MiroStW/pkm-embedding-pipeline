@@ -12,12 +12,12 @@ created: 2024-09-27
 1. Create a new Python project with virtual environment
 2. Install required dependencies:
    ```
-   pip install python-frontmatter markdown asyncio aiohttp pyyaml sentence-transformers openai pinecone-client sqlalchemy
+   pip install python-frontmatter markdown asyncio aiohttp pyyaml sentence-transformers  pinecone-client sqlalchemy
    ```
 3. Set up configuration file structure (YAML)
 4. Initialize SQLite database for tracking
 
-**Checkpoint**: Environment runs successfully with `python -c "import asyncio, aiohttp, frontmatter, markdown, yaml, sentence_transformers, openai, pinecone, sqlalchemy"`
+**Checkpoint**: Environment runs successfully with `python -c "import asyncio, aiohttp, frontmatter, markdown, yaml, sentence_transformers, pinecone, sqlalchemy"`
 
 ## Step 2: Document Processor Implementation
 
@@ -31,13 +31,22 @@ created: 2024-09-27
 
 ## Step 3: Embedding Generation
 
-1. Implement embedding model interface
-2. Add OpenAI embedding model integration
-3. Create fallback to sentence-transformers
+1. Implement embedding model interface with base encode method
+2. Add primary model implementation using `intfloat/multilingual-e5-large-instruct`
+   - Configure for M2 Max Neural Engine (MPS device)
+   - Set up optimal batch sizes for hardware
+3. Create fallback model implementation using `sentence-transformers/distiluse-base-multilingual-cased-v2`
+   - Configure same hardware optimizations
+   - Implement automatic fallback triggers
 4. Build title-enhanced embedding generation
-5. Implement batch processing logic
+   - Implement content + title combination logic
+   - Add weighting mechanisms for title influence
+5. Implement batch processing with hardware optimization
+   - Configure batch sizes for M2 Max memory (32 samples)
+   - Add progress tracking for long-running operations
+   - Implement memory management for large document sets
 
-**Checkpoint**: System generates valid embeddings from sample chunks with both primary and fallback models
+**Checkpoint**: System generates valid embeddings from sample chunks with both primary and fallback models, utilizing M2 Max Neural Engine effectively
 
 ## Step 4: Database Components
 
