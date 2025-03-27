@@ -27,6 +27,8 @@ env/
 
 # Data and logs
 data/
+logs/
+pipeline_trigger
 *.log
 *.db
 *.sqlite

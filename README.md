@@ -83,6 +83,13 @@ python -m unittest discover tests
 python -m unittest tests.test_git_hooks
 ```
 
+For manual testing of Git hooks, use the shell script:
+
+```bash
+# Run from the project root directory
+tests/scripts/test_git_hooks.sh
+```
+
 ## Project Structure
 
 ```
@@ -110,6 +117,9 @@ embedding-pipeline/
 ## Implementation Status
 
 This project is currently in development. See `instructions/` directory for implementation plan and details.
+
 # Additional content
+
 # Modified for testing
+
 # Modified for testing
