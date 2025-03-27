@@ -7,6 +7,9 @@ import uuid
 import logging
 import unittest
 from datetime import datetime
+import tempfile
+import os
+import shutil
 
 # Make sure we can import from src
 sys.path.insert(0, '.')
@@ -24,6 +27,34 @@ logger = logging.getLogger(__name__)
 
 class TestDatabase(unittest.TestCase):
     """Test database components for the embedding pipeline."""
+
+    def setUp(self):
+        """Set up a test database environment"""
+        # Create a temporary directory for test data
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_db_path = os.path.join(self.temp_dir, "test_database.db")
+
+        # Override the database path for testing
+        # This will ensure we don't use the real database for tests
+        os.environ["TEST_DB_PATH"] = self.test_db_path
+
+        # Run database initialization to create schema
+        # The init_db function reads TEST_DB_PATH if it exists
+        self.engine, self.Session = init_db(test_mode=True, db_path=self.test_db_path)
+
+        logger.info(f"Test database initialized at {self.test_db_path}")
+
+    def tearDown(self):
+        """Clean up test environment"""
+        # Delete test database
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+        # Remove environment variable
+        if "TEST_DB_PATH" in os.environ:
+            del os.environ["TEST_DB_PATH"]
+
+        logger.info("Test database cleaned up")
 
     def test_document_tracking(self):
         """Test document state tracking."""

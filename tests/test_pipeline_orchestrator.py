@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from src.pipeline import PipelineOrchestrator
 from src.database.document_db import DocumentTracker
-from src.database.mock_vector_db import MockVectorDatabaseUploader
+from src.database.vector_db import VectorDatabaseUploader
 from src.database.checkpoint import CheckpointManager
 
 class TestPipelineOrchestrator(unittest.TestCase):
@@ -71,7 +71,7 @@ class TestPipelineOrchestrator(unittest.TestCase):
 
         # Initialize mocks
         self.mock_document_db = MagicMock(spec=DocumentTracker)
-        self.mock_vector_db = MagicMock(spec=MockVectorDatabaseUploader)
+        self.mock_vector_db = MagicMock(spec=VectorDatabaseUploader)
         self.mock_checkpoint_manager = MagicMock(spec=CheckpointManager)
 
     def tearDown(self):
@@ -113,7 +113,7 @@ class TestPipelineOrchestrator(unittest.TestCase):
         mock_worker_pool.assert_called_once_with(self.config)
 
     @patch('src.pipeline.orchestrator.DocumentTracker')
-    @patch('src.pipeline.orchestrator.VectorDatabaseUploader')
+    @patch('src.database.vector_db.VectorDatabaseUploader')
     @patch('src.pipeline.orchestrator.CheckpointManager')
     @patch('src.pipeline.orchestrator.DocumentProcessor')
     @patch('src.pipeline.orchestrator.WorkerPool')
@@ -144,7 +144,7 @@ class TestPipelineOrchestrator(unittest.TestCase):
         self.assertEqual(large_mode.value, "bulk")
 
     @patch('src.pipeline.orchestrator.DocumentTracker')
-    @patch('src.pipeline.orchestrator.VectorDatabaseUploader')
+    @patch('src.database.vector_db.VectorDatabaseUploader')
     @patch('src.pipeline.orchestrator.CheckpointManager')
     @patch('src.pipeline.orchestrator.DocumentProcessor')
     @patch('src.pipeline.orchestrator.WorkerPool')
@@ -202,7 +202,7 @@ class TestPipelineOrchestrator(unittest.TestCase):
         self.assertGreater(result['elapsed_time'], 0)
 
     @patch('src.pipeline.orchestrator.DocumentTracker')
-    @patch('src.pipeline.orchestrator.VectorDatabaseUploader')
+    @patch('src.database.vector_db.VectorDatabaseUploader')
     @patch('src.pipeline.orchestrator.CheckpointManager')
     @patch('src.pipeline.orchestrator.DocumentProcessor')
     @patch('src.pipeline.orchestrator.WorkerPool')

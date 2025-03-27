@@ -49,16 +49,21 @@ def load_config():
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
-def init_db():
+def init_db(test_mode=False, db_path=None):
     """Initialize the database connection and create tables if they don't exist."""
-    config = load_config()
-    db_path = config['database']['tracking_db_path']
+    if test_mode or db_path:
+        # Use the provided test database path
+        db_file = db_path
+    else:
+        # Use the configured database path from config.yaml
+        config = load_config()
+        db_file = config['database']['tracking_db_path']
 
     # Ensure directory exists
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    os.makedirs(os.path.dirname(db_file), exist_ok=True)
 
     # Create SQLite engine
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = create_engine(f"sqlite:///{db_file}")
 
     # Create tables
     Base.metadata.create_all(engine)

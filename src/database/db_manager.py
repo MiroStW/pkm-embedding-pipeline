@@ -4,6 +4,7 @@ Database manager module for tracking document states and managing work queue.
 import datetime
 import logging
 import hashlib
+import os
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -18,9 +19,22 @@ class DatabaseManager:
     Manages document tracking and persistent work queue operations.
     """
 
-    def __init__(self):
-        """Initialize the database manager with a session factory."""
-        self.engine, self.SessionFactory = init_db()
+    def __init__(self, test_db_path=None):
+        """
+        Initialize the database manager with a session factory.
+
+        Args:
+            test_db_path: Path to test database file (for testing only)
+        """
+        # Check if TEST_DB_PATH is set in environment
+        env_test_path = os.environ.get("TEST_DB_PATH")
+
+        # Use test path if provided directly or through environment
+        if test_db_path or env_test_path:
+            db_path = test_db_path or env_test_path
+            self.engine, self.SessionFactory = init_db(test_mode=True, db_path=db_path)
+        else:
+            self.engine, self.SessionFactory = init_db()
 
     def get_session(self) -> Session:
         """Create and return a new database session."""

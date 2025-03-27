@@ -28,33 +28,39 @@ class CheckpointManager:
         os.makedirs(checkpoint_dir, exist_ok=True)
 
     def save_checkpoint(self,
+                       process_id: str = DEFAULT_PROCESS_ID,
+                       state: Dict[str, Any] = None,
                        processed_files: Set[str] = None,
                        error_files: Set[str] = None,
                        processed_count: int = 0,
-                       error_count: int = 0,
-                       process_id: str = DEFAULT_PROCESS_ID) -> bool:
+                       error_count: int = 0) -> bool:
         """
         Save a checkpoint with the current processing state.
 
         Args:
+            process_id: Unique identifier for the process
+            state: Complete state dictionary (if provided, other parameters are ignored)
             processed_files: Set of processed file paths
             error_files: Set of file paths with errors
             processed_count: Number of processed files
             error_count: Number of files with errors
-            process_id: Unique identifier for the process (optional)
 
         Returns:
             True if checkpoint was saved successfully, False otherwise
         """
         try:
-            # Convert sets to lists for JSON serialization
-            state = {
-                'processed_files': list(processed_files) if processed_files else [],
-                'error_files': list(error_files) if error_files else [],
-                'processed_count': processed_count,
-                'error_count': error_count,
-                'checkpoint_time': datetime.datetime.utcnow().isoformat()
-            }
+            # If a complete state is provided, use it directly
+            if state is not None:
+                checkpoint_state = state
+            else:
+                # Convert sets to lists for JSON serialization
+                checkpoint_state = {
+                    'processed_files': list(processed_files) if processed_files else [],
+                    'error_files': list(error_files) if error_files else [],
+                    'processed_count': processed_count,
+                    'error_count': error_count,
+                    'checkpoint_time': datetime.datetime.utcnow().isoformat()
+                }
 
             # Create filename from process_id
             filename = os.path.join(self.checkpoint_dir, f"{process_id}.checkpoint.json")
@@ -64,7 +70,7 @@ class CheckpointManager:
 
             # Write to temp file first, then rename for atomicity
             with open(tmp_filename, 'w') as f:
-                json.dump(state, f, indent=2)
+                json.dump(checkpoint_state, f, indent=2)
 
             # Atomic rename
             os.replace(tmp_filename, filename)
