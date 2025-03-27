@@ -5,9 +5,12 @@ import os
 import json
 import logging
 import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 
 logger = logging.getLogger(__name__)
+
+# Default process ID for global pipeline checkpoints
+DEFAULT_PROCESS_ID = "pipeline_global"
 
 class CheckpointManager:
     """
@@ -24,20 +27,34 @@ class CheckpointManager:
         self.checkpoint_dir = checkpoint_dir
         os.makedirs(checkpoint_dir, exist_ok=True)
 
-    def save_checkpoint(self, process_id: str, state: Dict[str, Any]) -> bool:
+    def save_checkpoint(self,
+                       processed_files: Set[str] = None,
+                       error_files: Set[str] = None,
+                       processed_count: int = 0,
+                       error_count: int = 0,
+                       process_id: str = DEFAULT_PROCESS_ID) -> bool:
         """
         Save a checkpoint with the current processing state.
 
         Args:
-            process_id: Unique identifier for the process
-            state: Dictionary containing processing state
+            processed_files: Set of processed file paths
+            error_files: Set of file paths with errors
+            processed_count: Number of processed files
+            error_count: Number of files with errors
+            process_id: Unique identifier for the process (optional)
 
         Returns:
             True if checkpoint was saved successfully, False otherwise
         """
         try:
-            # Add timestamp to state
-            state['checkpoint_time'] = datetime.datetime.utcnow().isoformat()
+            # Convert sets to lists for JSON serialization
+            state = {
+                'processed_files': list(processed_files) if processed_files else [],
+                'error_files': list(error_files) if error_files else [],
+                'processed_count': processed_count,
+                'error_count': error_count,
+                'checkpoint_time': datetime.datetime.utcnow().isoformat()
+            }
 
             # Create filename from process_id
             filename = os.path.join(self.checkpoint_dir, f"{process_id}.checkpoint.json")
@@ -59,12 +76,12 @@ class CheckpointManager:
             logger.error(f"Error saving checkpoint for process {process_id}: {str(e)}")
             return False
 
-    def load_checkpoint(self, process_id: str) -> Optional[Dict[str, Any]]:
+    def load_checkpoint(self, process_id: str = DEFAULT_PROCESS_ID) -> Optional[Dict[str, Any]]:
         """
-        Load a checkpoint from the provided process_id.
+        Load a checkpoint.
 
         Args:
-            process_id: Unique identifier for the process
+            process_id: Unique identifier for the process (optional)
 
         Returns:
             State dictionary if checkpoint exists, None otherwise

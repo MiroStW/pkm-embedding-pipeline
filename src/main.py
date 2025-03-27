@@ -2,12 +2,15 @@
 Main entry point for the PKM Chatbot embedding pipeline.
 """
 import os
+import sys
 import argparse
 import logging
 import yaml
 import json
+import asyncio
 from src.database.init_db import init_db
 from src.processors import DocumentProcessor
+from src.pipeline import PipelineOrchestrator
 
 def setup_logging(config):
     """Set up logging based on configuration."""
@@ -63,8 +66,71 @@ def parse_args():
     parser.add_argument('--test', action='store_true', help='Run document processor test')
     parser.add_argument('--file', help='Process a single file')
     parser.add_argument('--directory', help='Process a directory')
+    parser.add_argument('--resume', action='store_true', help='Resume from last checkpoint')
+    parser.add_argument('--batch-size', type=int, help='Batch size for bulk processing')
+    parser.add_argument('--adaptive-scaling', action='store_true', help='Enable adaptive worker pool scaling')
 
     return parser.parse_args()
+
+async def run_pipeline(config, args):
+    """Run the pipeline with the specified configuration."""
+    logging.info("Initializing pipeline orchestrator")
+    orchestrator = PipelineOrchestrator(config)
+
+    # Determine files to process
+    files_to_process = []
+
+    if args.file:
+        # Process a single file
+        if os.path.exists(args.file):
+            files_to_process = [args.file]
+        else:
+            logging.error(f"File not found: {args.file}")
+            return False
+    elif args.directory:
+        # Process all markdown files in a directory (recursively)
+        if not os.path.exists(args.directory):
+            logging.error(f"Directory not found: {args.directory}")
+            return False
+
+        for root, _, files in os.walk(args.directory):
+            for file in files:
+                if file.endswith('.md'):
+                    file_path = os.path.join(root, file)
+                    files_to_process.append(file_path)
+
+        logging.info(f"Found {len(files_to_process)} markdown files in directory: {args.directory}")
+    else:
+        # Process all files tracked by the document database
+        logging.info("No specific files provided, processing all tracked files")
+        files_to_process = orchestrator.document_db.get_all_files()
+
+    if not files_to_process and not args.resume:
+        logging.error("No files to process")
+        return False
+
+    # Run pipeline
+    if args.resume:
+        logging.info("Resuming from last checkpoint")
+        result = await orchestrator.resume_from_checkpoint()
+        if not result:
+            logging.error("Failed to resume from checkpoint")
+            return False
+    else:
+        result = await orchestrator.run(files_to_process)
+
+    # Display results
+    if result['status'] == 'completed':
+        logging.info("Pipeline execution completed successfully:")
+        logging.info(f"- Total files: {result['total_files']}")
+        logging.info(f"- Processed files: {result['processed_files']}")
+        logging.info(f"- Files with errors: {result['error_files']}")
+        logging.info(f"- Elapsed time: {result['elapsed_time']:.2f} seconds")
+        logging.info(f"- Throughput: {result['throughput']:.2f} files per second")
+        return True
+    else:
+        logging.error(f"Pipeline execution failed: {result.get('error', 'Unknown error')}")
+        return False
 
 def main():
     """Main entry point of the application."""
@@ -80,6 +146,10 @@ def main():
         config['pipeline']['processing_mode'] = args.mode
     if args.verbose:
         config['logging']['level'] = 'DEBUG'
+    if args.batch_size is not None:
+        config['pipeline']['batch_size'] = args.batch_size
+    if args.adaptive_scaling:
+        config['pipeline']['adaptive_scaling'] = True
 
     # Set up logging
     setup_logging(config)
@@ -127,23 +197,21 @@ def main():
             json.dump(result, f, indent=2, default=str)
 
         print(f"\nFull result saved to: {output_path}")
+    else:
+        # Run pipeline
+        try:
+            # Run the async pipeline
+            if sys.platform == 'win32':
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    elif args.file:
-        # Process a single file
-        result = processor.process_file(args.file)
-        print(f"Processed file: {args.file} - Status: {result['status']}")
-
-    elif args.directory:
-        # Process a directory
-        results = processor.process_directory(args.directory)
-        print(f"Processed {len(results)} files in directory: {args.directory}")
-
-        # Print summary
-        success_count = sum(1 for r in results if r['status'] == 'success')
-        error_count = sum(1 for r in results if r['status'] == 'error')
-        skipped_count = sum(1 for r in results if r['status'] == 'skipped')
-
-        print(f"Success: {success_count}, Errors: {error_count}, Skipped: {skipped_count}")
+            result = asyncio.run(run_pipeline(config, args))
+            sys.exit(0 if result else 1)
+        except KeyboardInterrupt:
+            logging.info("Pipeline execution interrupted by user")
+            sys.exit(1)
+        except Exception as e:
+            logging.exception(f"Unexpected error: {str(e)}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()

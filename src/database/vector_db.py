@@ -3,9 +3,7 @@ Vector database uploader module for sending embeddings to Pinecone.
 """
 import logging
 import time
-import uuid
-from typing import List, Dict, Any, Optional, Tuple, Union
-import pinecone
+from typing import List, Dict, Any, Optional, Tuple
 from pinecone import Pinecone, PodSpec
 
 logger = logging.getLogger(__name__)
@@ -256,14 +254,14 @@ class VectorDatabaseUploader:
 
     def query_test(self, vector: List[float], top_k: int = 3) -> List[Dict[str, Any]]:
         """
-        Run a test query to verify the database is working properly.
+        Run a test query on the vector database.
 
         Args:
             vector: Query vector
             top_k: Number of results to return
 
         Returns:
-            List of query results
+            List of matching documents with scores
         """
         try:
             results = self._with_retry(
@@ -272,7 +270,54 @@ class VectorDatabaseUploader:
                 top_k=top_k,
                 include_metadata=True
             )
+
             return results.matches
         except Exception as e:
-            logger.error(f"Failed to run test query: {str(e)}")
+            logger.error(f"Error querying vector database: {str(e)}")
             return []
+
+    def index_document(self, document_result: Dict[str, Any]) -> bool:
+        """
+        Index a document in the vector database.
+        Used by the pipeline orchestrator to process document results.
+
+        Args:
+            document_result: Document processing result containing metadata and chunks
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if document_result.get('status') != 'success':
+                logger.error(f"Cannot index document with status: {document_result.get('status')}")
+                return False
+
+            document_id = document_result.get('metadata', {}).get('id')
+            if not document_id:
+                logger.error("Document has no ID, cannot index")
+                return False
+
+            chunks = document_result.get('chunks', [])
+            if not chunks:
+                logger.warning(f"Document {document_id} has no chunks to index")
+                return False
+
+            # For now, we're mocking the embeddings generation
+            # In a real implementation, this would use a model to generate embeddings
+            mock_embeddings = [[0.1] * self.dimension for _ in range(len(chunks))]
+
+            # Upload to vector database
+            success_count, error_count = self.upload_document_chunks(
+                document_id=document_id,
+                chunks=chunks,
+                embeddings=mock_embeddings
+            )
+
+            if error_count > 0:
+                logger.warning(f"Indexed document {document_id} with {error_count} errors")
+
+            return success_count > 0
+
+        except Exception as e:
+            logger.error(f"Error indexing document: {str(e)}")
+            return False

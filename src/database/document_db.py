@@ -8,8 +8,8 @@ This module provides functionality for tracking document processing status.
 import os
 import sqlite3
 import logging
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+import json
+from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class DocumentTracker:
             status TEXT NOT NULL,
             last_modified TIMESTAMP,
             last_processed TIMESTAMP,
+            metadata TEXT,
             error TEXT
         )
         ''')
@@ -167,4 +168,122 @@ class DocumentTracker:
             return files
         except Exception as e:
             logger.error(f"Error getting files for deletion: {e}")
+            return []
+
+    def is_processed(self, file_path: str) -> bool:
+        """
+        Check if a document has been successfully processed.
+
+        Args:
+            file_path: Path to the document.
+
+        Returns:
+            True if the document has been successfully processed, False otherwise.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT status FROM documents WHERE path = ?", (file_path,))
+            result = cursor.fetchone()
+
+            conn.close()
+
+            # Return True if the document exists and has status 'completed'
+            return result is not None and result[0] == 'completed'
+        except Exception as e:
+            logger.error(f"Error checking if document is processed: {e}")
+            return False
+
+    def mark_completed(self, file_path: str, metadata: Dict[str, Any]) -> bool:
+        """
+        Mark a document as successfully processed.
+
+        Args:
+            file_path: Path to the document.
+            metadata: Document metadata to store.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Serialize metadata to JSON
+            metadata_json = json.dumps(metadata)
+
+            # Update the document status
+            cursor.execute(
+                "UPDATE documents SET status = 'completed', last_processed = CURRENT_TIMESTAMP, metadata = ? WHERE path = ?",
+                (metadata_json, file_path)
+            )
+
+            # If the document doesn't exist, insert it
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    "INSERT INTO documents (path, status, last_modified, last_processed, metadata) VALUES (?, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
+                    (file_path, metadata_json)
+                )
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.error(f"Error marking document as completed: {e}")
+            return False
+
+    def mark_error(self, file_path: str, error_message: str) -> bool:
+        """
+        Mark a document as having an error during processing.
+
+        Args:
+            file_path: Path to the document.
+            error_message: Error message to store.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Update the document status
+            cursor.execute(
+                "UPDATE documents SET status = 'error', last_processed = CURRENT_TIMESTAMP, error = ? WHERE path = ?",
+                (error_message, file_path)
+            )
+
+            # If the document doesn't exist, insert it
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    "INSERT INTO documents (path, status, last_modified, last_processed, error) VALUES (?, 'error', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
+                    (file_path, error_message)
+                )
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.error(f"Error marking document with error: {e}")
+            return False
+
+    def get_all_files(self) -> List[str]:
+        """
+        Get all files tracked in the database.
+
+        Returns:
+            List of all file paths in the database.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT path FROM documents")
+            files = [row[0] for row in cursor.fetchall()]
+
+            conn.close()
+            return files
+        except Exception as e:
+            logger.error(f"Error getting all files: {e}")
             return []
