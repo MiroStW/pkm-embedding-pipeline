@@ -1,10 +1,10 @@
 ---
-# PKM Chatbot Embedding Pipeline Configuration
+# PKM Chatbot Embedding Pipeline Test Configuration
 
 # Database Configuration
 database:
-  tracking_db_path: data/document_tracker.db
-  checkpoint_dir: data/checkpoints
+  tracking_db_path: data/test_document_tracker.db
+  checkpoint_dir: data/test_checkpoints
   vector_db:
     provider: "pinecone"
     api_key: "${PINECONE_API_KEY}"
@@ -14,24 +14,26 @@ database:
     max_retries: 3
     retry_delay: 2.0
     batch_size: 100
+    # Use test namespace to avoid affecting production data
+    namespace: "test_namespace"
     # Serverless configuration (optional)
     serverless: false
-    cloud_provider: "aws" # aws, gcp, azure
-    region: "us-east-1" # Region for serverless deployment
+    cloud_provider: "aws"
+    region: "us-east-1"
 
 # Embedding Configuration
 embedding:
-  # Model type: "e5" (primary) or "distiluse" (fallback)
+  # Use same model type as production
   model_type: e5
 
-  # Primary embedding model (E5)
+  # Primary embedding model (same as production)
   primary_model: intfloat/multilingual-e5-small
 
-  # Fallback embedding model (DistilUSE)
+  # Fallback embedding model (same as production)
   fallback_model: sentence-transformers/distiluse-base-multilingual-cased-v1
 
   # Hardware optimization
-  device: auto # can be cpu, cuda, mps, or auto
+  device: auto # Same as production
 
   # Title-enhanced embedding settings
   enable_title_enhanced: true
@@ -49,9 +51,8 @@ processing:
     - "title:"
     - "# "
 
-# Chunking Configuration
+# Chunking Configuration (same as production)
 chunking:
-  # Chunking settings
   chunk_size: 256
   chunk_overlap: 32
   respect_structure: true
@@ -65,24 +66,18 @@ metadata:
   extract_links: true
   extract_keywords: false
 
-# Pipeline Configuration
+# Pipeline Configuration (still using single worker for test stability)
 pipeline:
-  # Mode can be one of: incremental, bulk, auto
-  processing_mode: auto
-  # Maximum number of workers to use
-  max_workers: 4
-  # Minimum number of files per worker before scaling up
+  processing_mode: incremental
+  max_workers: 1 # Using 1 worker for test stability (vs 4 in production)
   min_files_per_worker: 10
-  # Enable/disable adaptive scaling based on system load
-  enable_adaptive_scaling: true
-  # Target CPU usage percentage for adaptive scaling (0-100)
+  enable_adaptive_scaling: false
   target_cpu_usage: 70
-  # Memory threshold percentage for scaling back (0-100)
   memory_threshold: 90
 
 # Logging Configuration
 logging:
   level: INFO
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  log_file: "data/pipeline.log"
+  log_file: "data/test_pipeline.log"
   console_output: true
