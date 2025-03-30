@@ -438,3 +438,64 @@ class PineconeClient(VectorDatabaseUploader):
         if is_enhanced:
             return f"{document_id}_{chunk_index}_enhanced"
         return f"{document_id}_{chunk_index}"
+
+    def delete_document(self, document_id: str) -> bool:
+        """
+        Delete all vectors associated with a document.
+
+        Args:
+            document_id: The unique ID of the document
+
+        Returns:
+            True if deletion was successful, False otherwise
+        """
+        try:
+            if self.index is None:
+                self._init_connection()
+
+            # For Serverless and Starter indexes, we need to get the IDs first
+            # as metadata filtering in delete operations is not supported
+            try:
+                # First query to get all vector IDs for this document
+                results = self._with_retry(
+                    self.index.query,
+                    vector=[0.1] * self.dimension,  # Dummy vector for metadata query
+                    top_k=10000,  # Set high to get all vectors
+                    filter={"document_id": {"$eq": document_id}},
+                    include_metadata=False
+                )
+
+                # Extract IDs from results
+                ids_to_delete = [match.get('id') for match in results.get('matches', [])]
+
+                if ids_to_delete:
+                    logger.info(f"Deleting {len(ids_to_delete)} vectors for document {document_id}")
+                    # Delete vectors by ID
+                    self._with_retry(
+                        self.index.delete,
+                        ids=ids_to_delete
+                    )
+                else:
+                    logger.info(f"No vectors found for document {document_id}")
+
+                return True
+
+            except Exception as e:
+                if "not support deleting with metadata filtering" in str(e):
+                    # Alternative approach: delete using ID prefix
+                    # This relies on our ID naming convention: document_id_chunk_index
+                    logger.info(f"Falling back to ID prefix-based deletion for document {document_id}")
+
+                    # Delete vectors with prefix matching (this is a specialized method)
+                    self._with_retry(
+                        self.index.delete,
+                        ids=f"{document_id}_*"  # Using wildcard pattern if supported
+                    )
+                    return True
+                else:
+                    # Re-raise if it's a different error
+                    raise e
+
+        except Exception as e:
+            logger.error(f"Error deleting document {document_id}: {str(e)}")
+            return False

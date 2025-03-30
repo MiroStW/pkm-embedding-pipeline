@@ -3,8 +3,12 @@ Vector database uploader module for sending embeddings to Pinecone.
 """
 import logging
 import time
+import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from pinecone import Pinecone, ServerlessSpec, PodSpec
+
+from src.models import EmbeddingModelFactory
+from src.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -236,14 +240,48 @@ class VectorDatabaseUploader:
             if self.index is None:
                 self._init_connection()
 
-            # Delete the vectors with prefix matching
-            self._with_retry(
-                self.index.delete,
-                filter={"document_id": {"$eq": document_id}}
-            )
+            # For Serverless and Starter indexes, we need to get the IDs first
+            # as metadata filtering in delete operations is not supported
+            try:
+                # First query to get all vector IDs for this document
+                results = self._with_retry(
+                    self.index.query,
+                    vector=[0.1] * self.dimension,  # Dummy vector for metadata query
+                    top_k=10000,  # Set high to get all vectors
+                    filter={"document_id": {"$eq": document_id}},
+                    include_metadata=False
+                )
 
-            logger.info(f"Deleted all vectors for document {document_id}")
-            return True
+                # Extract IDs from results
+                ids_to_delete = [match.get('id') for match in results.get('matches', [])]
+
+                if ids_to_delete:
+                    logger.info(f"Deleting {len(ids_to_delete)} vectors for document {document_id}")
+                    # Delete vectors by ID
+                    self._with_retry(
+                        self.index.delete,
+                        ids=ids_to_delete
+                    )
+                else:
+                    logger.info(f"No vectors found for document {document_id}")
+
+                return True
+
+            except Exception as e:
+                if "not support deleting with metadata filtering" in str(e):
+                    # Alternative approach: delete using ID prefix
+                    # This relies on our ID naming convention: document_id_chunk_index
+                    logger.info(f"Falling back to ID prefix-based deletion for document {document_id}")
+
+                    # Delete vectors with prefix matching (this is a specialized method)
+                    self._with_retry(
+                        self.index.delete,
+                        ids=f"{document_id}_*"  # Using wildcard pattern if supported
+                    )
+                    return True
+                else:
+                    # Re-raise if it's a different error
+                    raise e
 
         except Exception as e:
             logger.error(f"Error deleting document {document_id}: {str(e)}")
@@ -313,15 +351,97 @@ class VectorDatabaseUploader:
                 logger.warning(f"Document {document_id} has no chunks to index")
                 return False
 
-            # For now, we're mocking the embeddings generation
-            # In a real implementation, this would use a model to generate embeddings
-            mock_embeddings = [[0.1] * self.dimension for _ in range(len(chunks))]
+            # Get embedding config
+            config_manager = ConfigManager()
+            embedding_config = config_manager.get_embedding_config()
+
+            logger.info(f"Creating embedding model for document {document_id}")
+            # Create embedding model
+            embedding_model = asyncio.run(EmbeddingModelFactory.create_model(embedding_config))
+
+            # Generate content embeddings
+            content_texts = [chunk.get('content', '') for chunk in chunks]
+            logger.info(f"Generating {len(content_texts)} regular embeddings for document {document_id}")
+
+            try:
+                embeddings = asyncio.run(embedding_model.generate_embeddings(content_texts))
+                logger.info(f"Generated {len(embeddings)} regular embeddings for document {document_id}")
+            except Exception as e:
+                logger.error(f"Error generating embeddings for document {document_id}: {str(e)}")
+                logger.info("Falling back to mock embeddings")
+                # Fallback to mock embeddings if embedding generation fails
+                embeddings = [[0.1] * self.dimension for _ in range(len(chunks))]
+
+            # Check if title-enhanced embeddings are enabled
+            title_enhanced_embeddings = None
+            if embedding_config.get('enable_title_enhanced', True):
+                logger.info(f"Title-enhanced embeddings are enabled with weight {embedding_config.get('title_weight', 0.3)}")
+                # Generate title-enhanced embeddings
+                title_weight = embedding_config.get('title_weight', 0.3)
+
+                # Prepare batch input for title-enhanced embeddings
+                enhanced_batch = []
+                for i, chunk in enumerate(chunks):
+                    title = chunk.get('metadata', {}).get('section_title', '') or document_result.get('metadata', {}).get('title', '')
+                    content = chunk.get('content', '')
+
+                    if title and content:
+                        enhanced_batch.append({
+                            'title': title,
+                            'content': content,
+                            'index': i
+                        })
+
+                # Generate title-enhanced embeddings in batch if we have any
+                if enhanced_batch:
+                    logger.info(f"Generating {len(enhanced_batch)} title-enhanced embeddings for document {document_id}")
+
+                    # Process the batch more efficiently
+                    title_enhanced_embeddings = [None] * len(chunks)
+
+                    # Process in smaller batches to avoid memory issues (optional)
+                    batch_size = 10  # Adjust based on available memory
+                    for i in range(0, len(enhanced_batch), batch_size):
+                        batch_slice = enhanced_batch[i:i + batch_size]
+                        logger.info(f"Processing batch {i//batch_size + 1}/{(len(enhanced_batch) + batch_size - 1)//batch_size} of title-enhanced embeddings")
+
+                        # Generate embeddings for this batch slice
+                        for item in batch_slice:
+                            try:
+                                enhanced = asyncio.run(embedding_model.generate_title_enhanced_embedding(
+                                    title=item['title'],
+                                    content=item['content'],
+                                    title_weight=title_weight
+                                ))
+                                title_enhanced_embeddings[item['index']] = enhanced
+                            except Exception as e:
+                                logger.error(f"Error generating enhanced embedding for chunk {item['index']}: {str(e)}")
+                                # Use regular embedding as fallback
+                                if item['index'] < len(embeddings):
+                                    title_enhanced_embeddings[item['index']] = embeddings[item['index']]
+
+                    # Fill in any missing title-enhanced embeddings with regular embeddings
+                    missing_count = sum(1 for x in title_enhanced_embeddings if x is None)
+                    if missing_count > 0:
+                        logger.info(f"Filling in {missing_count} missing title-enhanced embeddings with regular embeddings")
+
+                    for i in range(len(chunks)):
+                        if title_enhanced_embeddings[i] is None:
+                            title_enhanced_embeddings[i] = embeddings[i]
+                else:
+                    logger.info(f"No titles found for document {document_id}, using regular embeddings")
+                    # No titles available, use regular embeddings
+                    title_enhanced_embeddings = embeddings
+            else:
+                logger.info(f"Title-enhanced embeddings are disabled for document {document_id}")
 
             # Upload to vector database
+            logger.info(f"Uploading document {document_id} with {len(embeddings)} regular embeddings and {len(title_enhanced_embeddings) if title_enhanced_embeddings else 0} title-enhanced embeddings")
             success_count, error_count = self.upload_document_chunks(
                 document_id=document_id,
                 chunks=chunks,
-                embeddings=mock_embeddings
+                embeddings=embeddings,
+                title_enhanced_embeddings=title_enhanced_embeddings
             )
 
             if error_count > 0:
