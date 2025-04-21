@@ -4,11 +4,20 @@ A pipeline for processing markdown files, generating embeddings, and synchronizi
 
 ## Installation
 
-1. Create a virtual environment:
+1. Create and activate a virtual environment:
 
 ```bash
+# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# On macOS/Linux:
+source venv/bin/activate
+
+# On Windows:
+# venv\Scripts\activate
+
+# Verify you're in the virtual environment (should show path to venv)
+which python
 ```
 
 2. Install dependencies:
@@ -23,6 +32,56 @@ pip install -r requirements.txt
 cp config/config.example.yaml config/config.yaml
 # Edit config/config.yaml to match your environment
 ```
+
+## Document Tracking System
+
+The pipeline uses a SQLite database to track the status of documents being processed. This helps maintain state across runs and enables incremental processing.
+
+### Document States
+
+Documents can be in one of these states:
+
+- `pending`: Marked for processing but not yet processed
+- `processing`: Currently being processed
+- `completed`: Successfully processed and stored in the vector database
+- `error`: Failed to process due to an error
+
+### Managing Document States
+
+You can check and manage document states using Python:
+
+```python
+from src.database.document_db import DocumentTracker
+
+# Initialize the tracker
+tracker = DocumentTracker()
+
+# Get document statistics
+stats = tracker.get_statistics()
+print(f"Total documents: {stats['total']}")
+print(f"Pending: {stats['pending']} ({stats['pending_percentage']}%)")
+print(f"Completed: {stats['completed']} ({stats['completed_percentage']}%)")
+print(f"Errors: {stats['errors']} ({stats['error_percentage']}%)")
+
+# Get lists of documents by state
+pending_docs = tracker.get_pending_documents()
+completed_docs = tracker.get_completed_documents()
+error_docs = tracker.get_error_documents()
+
+# Mark a document for processing
+tracker.mark_for_processing("path/to/document.md")
+
+# Reset the status of processed documents
+# You can do this directly with SQLite:
+import sqlite3
+conn = sqlite3.connect("data/document_tracker.db")
+cursor = conn.cursor()
+cursor.execute('DELETE FROM documents WHERE status = "completed"')
+conn.commit()
+conn.close()
+```
+
+The document tracking database is automatically created at `data/document_tracker.db` when needed.
 
 ## Usage
 
@@ -153,6 +212,49 @@ embedding-pipeline/
 - Tracks document states in SQLite database
 - Supports bulk and incremental processing modes
 - Integrates with Pinecone vector database
+
+## Troubleshooting
+
+### Common Issues
+
+1. **ModuleNotFoundError: No module named 'yaml'**
+
+   - This means you're missing required dependencies
+   - Make sure you're in the virtual environment (`which python` should point to your venv)
+   - Run `pip install -r requirements.txt` again
+
+2. **sqlite3.OperationalError: unable to open database file**
+
+   - The `data` directory might not exist
+   - Create it manually: `mkdir -p data`
+   - The database will be automatically initialized on next operation
+
+3. **Document status not updating**
+   - Check if you have write permissions in the `data` directory
+   - Verify the database exists: `ls -l data/document_tracker.db`
+   - You can reset document states using the DocumentTracker examples above
+
+### Dependencies Overview
+
+Key dependencies and their purposes:
+
+- `pyyaml`: Configuration file handling
+- `sqlalchemy`: Database ORM and management
+- `pinecone-client`: Vector database integration
+- `transformers`: For embedding generation
+- `torch`: Required by transformers
+- `python-dotenv`: Environment variable management
+
+Make sure to install all dependencies in a virtual environment to avoid conflicts.
+
+### Database Location
+
+The SQLite database files are stored in the following locations:
+
+- Document tracking: `data/document_tracker.db`
+- Processing queue: `data/processing_queue.db` (created when needed)
+
+You can safely delete these files to reset all document states, they will be recreated automatically.
 
 ## Implementation Status
 

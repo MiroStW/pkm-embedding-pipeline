@@ -40,11 +40,9 @@ class PipelineOrchestrator:
         self.document_db = DocumentTracker(config.get('database', {}).get('tracking_db_path'))
 
         # Use factory to create vector DB uploader
-        self.vector_db = create_vector_db_uploader(config)
-        if self.vector_db is None:
-            self.logger.warning("Vector database is not configured correctly, using mock implementation")
-            from src.database.mock_vector_db import MockVectorDatabaseUploader
-            self.vector_db = MockVectorDatabaseUploader()
+        # NOTE: This is a coroutine, so it needs to be awaited before use
+        self.vector_db_coro = create_vector_db_uploader(config)
+        self.vector_db = None  # Will be initialized in run()
 
         self.checkpoint_manager = CheckpointManager(config.get('database', {}).get('checkpoint_dir', 'data/checkpoints'))
         self.document_processor = DocumentProcessor(config)
@@ -170,166 +168,166 @@ class PipelineOrchestrator:
             try:
                 # Process each file in the batch
                 for file_path in batch:
+                    print(f"DEBUG: Consumer {consumer_id} processing file: {file_path}")
                     try:
                         # Process document
                         result = await self.worker_pool.submit(
                             self.document_processor.process_file,
                             file_path
                         )
+                        print(f"DEBUG: Consumer {consumer_id} got result for {file_path}: {result}")
 
                         # Update tracking database
-                        if result['status'] == 'success':
+                        if result and result.get('status') == 'success':
+                            print(f"DEBUG: Consumer {consumer_id} proceeding to index {file_path}")
                             # Generate embeddings and store in vector database
-                            embedding_result = await self.worker_pool.submit(
-                                self.vector_db.index_document,
-                                result
-                            )
+                            try:
+                                # Ensure vector_db is available (not None)
+                                if self.vector_db is None:
+                                    self.logger.error(f"Vector database not initialized")
+                                    raise RuntimeError("Vector database not initialized")
 
-                            # Update document status
-                            self.document_db.mark_completed(file_path, result['metadata'])
+                                # Index the document DIRECTLY (not via worker pool)
+                                embedding_result = await self.vector_db.index_document(result)
 
-                            # Update tracking
-                            self.processed_count += 1
-                            self.processed_files.add(file_path)
+                                # Check if indexing was successful (optional, based on index_document return)
+                                if not embedding_result:
+                                    self.logger.error(f"Failed to index document {file_path}")
+                                    self.document_db.mark_error(file_path, "Failed during indexing step")
+                                    self.error_count += 1
+                                    self.error_files.add(file_path)
+                                    continue # Skip to next file in batch
 
-                            # Log success
-                            self.logger.info(f"Successfully processed: {file_path}")
+                                # Update document status if indexing successful
+                                self.document_db.mark_completed(file_path, result['metadata'])
+
+                                # Update tracking
+                                self.processed_count += 1
+                                self.processed_files.add(file_path)
+
+                                # Log success
+                                self.logger.info(f"Successfully processed and indexed: {file_path}")
+
+
+                            except Exception as e:
+                                # Handle vector database errors
+                                self.logger.error(f"Error indexing file {file_path}: {str(e)}")
+                                self.document_db.mark_error(file_path, f"Indexing error: {str(e)}")
+                                self.error_count += 1
+                                self.error_files.add(file_path)
                         else:
+                            print(f"DEBUG: Consumer {consumer_id} NOT indexing {file_path} - Status was not 'success' or result empty.")
                             # Mark as error
-                            self.document_db.mark_error(file_path, result.get('error', 'Unknown error'))
+                            error_msg = result.get('error', 'Unknown error or non-success status') if result else 'Empty result from process_file'
+                            self.document_db.mark_error(file_path, error_msg)
                             self.error_count += 1
                             self.error_files.add(file_path)
-                            self.logger.error(f"Error processing file {file_path}: {result.get('error', 'Unknown error')}")
 
                     except Exception as e:
-                        # Handle unexpected errors
+                        # Handle general processing errors
+                        self.logger.error(f"Exception processing file {file_path}: {str(e)}")
+                        self.document_db.mark_error(file_path, str(e))
                         self.error_count += 1
                         self.error_files.add(file_path)
-                        self.logger.exception(f"Exception processing file {file_path}: {str(e)}")
 
-                        # Update database
-                        self.document_db.mark_error(file_path, str(e))
-
-                # Create checkpoint after each batch
-                self.checkpoint_manager.save_checkpoint(
-                    processed_files=self.processed_files,
-                    error_files=self.error_files,
-                    processed_count=self.processed_count,
-                    error_count=self.error_count
-                )
-
-            finally:
                 # Mark batch as done
+                self.queue.task_done()
+
+            except Exception as e:
+                self.logger.error(f"Unhandled exception in consumer {consumer_id}: {str(e)}")
+                # Mark batch as done even if there was an error
                 self.queue.task_done()
 
         self.logger.info(f"Consumer {consumer_id} completed")
 
     async def run(self, files_to_process: List[str]) -> Dict[str, Any]:
         """
-        Run the pipeline on the specified files.
+        Run the pipeline with the specified files.
 
         Args:
             files_to_process: List of file paths to process
 
         Returns:
-            Dictionary with pipeline execution statistics
+            Dictionary with results of the pipeline run
         """
-        if self.running:
-            raise RuntimeError("Pipeline is already running")
-
-        self.running = True
         self.start_time = time.time()
+        self.running = True
+        self.processed_count = 0
+        self.error_count = 0
+        self.processed_files = set()
+        self.error_files = set()
 
+        # Initialize the vector database uploader
         try:
-            # Initialize worker pool
-            await self.worker_pool.start_monitoring()
-
-            # Start consumers
-            self.consumers = []
-            for i in range(self.consumer_count):
-                consumer = asyncio.create_task(self.consumer_task(i))
-                self.consumers.append(consumer)
-
-            # Start producer
-            self.producer = asyncio.create_task(self.producer_task(files_to_process))
-
-            # Wait for producer to complete
-            await self.producer
-
-            # Wait for all consumers to complete
-            await asyncio.gather(*self.consumers)
-
-            # Shutdown worker pool
-            await self.worker_pool.shutdown()
-
-            # Calculate statistics
-            self.end_time = time.time()
-            elapsed_time = self.end_time - self.start_time
-            throughput = self.processed_count / elapsed_time if elapsed_time > 0 else 0
-
-            return {
-                "status": "completed",
-                "total_files": len(files_to_process),
-                "processed_files": self.processed_count,
-                "error_files": self.error_count,
-                "elapsed_time": elapsed_time,
-                "throughput": throughput
-            }
-
+            self.vector_db = await self.vector_db_coro
+            if self.vector_db is None:
+                self.logger.error("Failed to initialize vector database uploader")
+                return {
+                    "status": "error",
+                    "error": "Failed to initialize vector database uploader"
+                }
         except Exception as e:
-            self.logger.exception(f"Pipeline execution failed: {str(e)}")
+            self.logger.error(f"Error initializing vector database uploader: {str(e)}")
             return {
-                "status": "failed",
-                "error": str(e),
-                "processed_files": self.processed_count,
-                "error_files": self.error_count
+                "status": "error",
+                "error": f"Error initializing vector database uploader: {str(e)}"
             }
-        finally:
-            self.running = False
+
+        # Start consumers
+        for i in range(self.consumer_count):
+            consumer = asyncio.create_task(self.consumer_task(i))
+            self.consumers.append(consumer)
+
+        # Start producer
+        self.producer = asyncio.create_task(self.producer_task(files_to_process))
+
+        # Wait for completion
+        await self.producer
+        await asyncio.gather(*self.consumers)
+
+        # Clean up
+        self.running = False
+        self.end_time = time.time()
+        self.worker_pool.shutdown()
+
+        # Save checkpoint
+        self.checkpoint_manager.save_checkpoint("pipeline_global", {
+            "last_run": time.time(),
+            "processed_files": len(self.processed_files),
+            "error_files": len(self.error_files),
+            "total_files": len(files_to_process)
+        })
+
+        # Return results
+        return {
+            "status": "completed",
+            "elapsed_time": self.end_time - self.start_time,
+            "total_files": len(files_to_process),
+            "processed_files": len(self.processed_files),
+            "error_files": len(self.error_files),
+            "throughput": len(self.processed_files) / (self.end_time - self.start_time) if self.end_time > self.start_time else 0
+        }
 
     async def resume_from_checkpoint(self) -> Optional[Dict[str, Any]]:
         """
         Resume pipeline execution from the last checkpoint.
 
         Returns:
-            Dictionary with pipeline execution statistics or None if no checkpoint
+            Results of the pipeline run, or None if no checkpoint is available
         """
-        # Load checkpoint
-        checkpoint = self.checkpoint_manager.load_checkpoint()
+        checkpoint = self.checkpoint_manager.load_checkpoint("pipeline_global")
         if not checkpoint:
-            self.logger.info("No checkpoint found to resume from")
+            self.logger.warning("No checkpoint found, cannot resume")
             return None
 
-        # Extract checkpoint data
-        processed_files = set(checkpoint.get('processed_files', []))
-        error_files = set(checkpoint.get('error_files', []))
+        # Get pending and error files
+        pending_files = self.document_db.get_pending_documents()
+        error_files = self.document_db.get_error_documents()
 
-        # Get all files that need processing
-        all_files = self.document_db.get_all_files()
+        files_to_process = pending_files + error_files
+        if not files_to_process:
+            self.logger.warning("No pending or error files to process")
+            return None
 
-        # Filter out already processed files
-        files_to_process = [f for f in all_files if f not in processed_files and f not in error_files]
-
-        self.logger.info(f"Resuming from checkpoint: {len(processed_files)} processed, "
-                        f"{len(error_files)} errors, {len(files_to_process)} remaining")
-
-        # Initialize state from checkpoint
-        self.processed_files = processed_files
-        self.error_files = error_files
-        self.processed_count = len(processed_files)
-        self.error_count = len(error_files)
-
-        # Run pipeline with remaining files
-        if files_to_process:
-            return await self.run(files_to_process)
-        else:
-            self.logger.info("No files remaining to process")
-            total_files = len(processed_files) + len(error_files)
-            return {
-                "status": "completed",
-                "total_files": total_files,
-                "processed_files": self.processed_count,
-                "error_files": self.error_count,
-                "elapsed_time": 0,
-                "throughput": 0
-            }
+        self.logger.info(f"Resuming from checkpoint with {len(files_to_process)} files")
+        return await self.run(files_to_process)

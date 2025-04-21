@@ -33,6 +33,7 @@ pipeline_trigger
 *.db
 *.sqlite
 *.sqlite3
+dummy-md-files/
 
 # IDE specific files
 .idea/

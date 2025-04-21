@@ -67,8 +67,8 @@ class VectorDatabaseUploader:
                     dimension=self.dimension,
                     metric="cosine",
                     spec=ServerlessSpec(
-                        cloud="gcp",
-                        region="us-west4"  # Free tier supported region
+                        cloud="aws",
+                        region="us-east-1"  # Free tier supported region
                     )
                 )
 
@@ -325,7 +325,7 @@ class VectorDatabaseUploader:
             logger.error(f"Error querying vector database: {str(e)}")
             return []
 
-    def index_document(self, document_result: Dict[str, Any]) -> bool:
+    async def index_document(self, document_result: Dict[str, Any]) -> bool:
         """
         Index a document in the vector database.
         Used by the pipeline orchestrator to process document results.
@@ -354,23 +354,30 @@ class VectorDatabaseUploader:
             # Get embedding config
             config_manager = ConfigManager()
             embedding_config = config_manager.get_embedding_config()
+            logger.debug(f"Using embedding config: {embedding_config}")
 
             logger.info(f"Creating embedding model for document {document_id}")
-            # Create embedding model
-            embedding_model = asyncio.run(EmbeddingModelFactory.create_model(embedding_config))
+            try:
+                # Create embedding model
+                embedding_model = await EmbeddingModelFactory.create_model(embedding_config)
+                logger.debug("Successfully created embedding model")
+            except Exception as e:
+                logger.error(f"Failed to create embedding model: {str(e)}")
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return False
 
             # Generate content embeddings
             content_texts = [chunk.get('content', '') for chunk in chunks]
             logger.info(f"Generating {len(content_texts)} regular embeddings for document {document_id}")
 
             try:
-                embeddings = asyncio.run(embedding_model.generate_embeddings(content_texts))
+                embeddings = await embedding_model.generate_embeddings(content_texts)
                 logger.info(f"Generated {len(embeddings)} regular embeddings for document {document_id}")
             except Exception as e:
                 logger.error(f"Error generating embeddings for document {document_id}: {str(e)}")
-                logger.info("Falling back to mock embeddings")
-                # Fallback to mock embeddings if embedding generation fails
-                embeddings = [[0.1] * self.dimension for _ in range(len(chunks))]
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                raise RuntimeError(f"Error generating embeddings for document {document_id}: {str(e)}")
 
             # Check if title-enhanced embeddings are enabled
             title_enhanced_embeddings = None
@@ -408,11 +415,11 @@ class VectorDatabaseUploader:
                         # Generate embeddings for this batch slice
                         for item in batch_slice:
                             try:
-                                enhanced = asyncio.run(embedding_model.generate_title_enhanced_embedding(
+                                enhanced = await embedding_model.generate_title_enhanced_embedding(
                                     title=item['title'],
                                     content=item['content'],
                                     title_weight=title_weight
-                                ))
+                                )
                                 title_enhanced_embeddings[item['index']] = enhanced
                             except Exception as e:
                                 logger.error(f"Error generating enhanced embedding for chunk {item['index']}: {str(e)}")
@@ -437,18 +444,24 @@ class VectorDatabaseUploader:
 
             # Upload to vector database
             logger.info(f"Uploading document {document_id} with {len(embeddings)} regular embeddings and {len(title_enhanced_embeddings) if title_enhanced_embeddings else 0} title-enhanced embeddings")
-            success_count, error_count = self.upload_document_chunks(
-                document_id=document_id,
-                chunks=chunks,
-                embeddings=embeddings,
-                title_enhanced_embeddings=title_enhanced_embeddings
-            )
+            try:
+                success_count, error_count = self.upload_document_chunks(
+                    document_id=document_id,
+                    chunks=chunks,
+                    embeddings=embeddings,
+                    title_enhanced_embeddings=title_enhanced_embeddings
+                )
 
-            if error_count > 0:
-                logger.warning(f"Indexed document {document_id} with {error_count} errors")
+                if error_count > 0:
+                    logger.warning(f"Indexed document {document_id} with {error_count} errors")
 
-            return success_count > 0
+                return success_count > 0
+            except Exception as e:
+                logger.error(f"Error uploading document chunks: {str(e)}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return False
 
         except Exception as e:
             logger.error(f"Error indexing document: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return False

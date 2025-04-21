@@ -2,6 +2,28 @@
 Main entry point for the PKM Chatbot embedding pipeline.
 """
 import os
+from dotenv import load_dotenv
+
+# DEBUG: Check environment BEFORE load_dotenv
+print("DEBUG [main]: PINECONE_INDEX_NAME in os.environ BEFORE load_dotenv():", os.environ.get('PINECONE_INDEX_NAME'))
+
+# Load environment variables from .env file
+load_dotenv_success = load_dotenv()
+
+# DEBUG: Check if load_dotenv reported success and check environment AFTER
+print(f"DEBUG [main]: load_dotenv() returned: {load_dotenv_success}")
+print("DEBUG [main]: PINECONE_INDEX_NAME in os.environ AFTER load_dotenv():", os.environ.get('PINECONE_INDEX_NAME'))
+
+print('DEBUG: PINECONE_API_KEY from env:', os.getenv('PINECONE_API_KEY'))
+
+try:
+    from pinecone import Pinecone
+    print('DEBUG: Testing Pinecone connection in main.py')
+    pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
+    print('DEBUG: Indexes:', pc.list_indexes().names())
+except Exception as e:
+    print('DEBUG: Pinecone connection failed:', e)
+
 import sys
 import argparse
 import logging
@@ -38,22 +60,41 @@ def setup_logging(config):
 
     logging.info("Logging initialized")
 
+def _recursive_substitute(config_node, env):
+    """Recursively substitute environment variables in config nodes."""
+    if isinstance(config_node, dict):
+        for key, value in config_node.items():
+            config_node[key] = _recursive_substitute(value, env)
+    elif isinstance(config_node, list):
+        for i, item in enumerate(config_node):
+            config_node[i] = _recursive_substitute(item, env)
+    elif isinstance(config_node, str) and config_node.startswith('${') and config_node.endswith('}'):
+        env_var = config_node[2:-1]
+        env_value = env.get(env_var)
+        # DEBUG: Check substitution attempt
+        print(f"DEBUG [load_config]: Checking substitution for key '{env_var}'. Found in os.environ: {env_var in env}. Value: {env_value}")
+        if env_value is not None: # Substitute if found
+            print(f"DEBUG [load_config]: Substituted '{env_var}' with value from environment") # DEBUG PRINT
+            return env_value
+        else:
+            print(f"DEBUG [load_config]: Did NOT substitute, env var '{env_var}' not found.") # DEBUG PRINT
+            return config_node # Return original string if not found
+
+    return config_node
+
 def load_config():
-    """Load configuration from YAML file."""
+    """Load configuration from YAML file and substitute environment variables."""
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'config.yaml')
+    print(f"DEBUG [load_config]: Loading config from: {config_path}")
     with open(config_path, 'r') as file:
         # Load base config
         config = yaml.safe_load(file)
+        print(f"DEBUG [load_config]: Initial config loaded: {config}")
 
-        # Override with environment variables if they exist
-        for section in config:
-            if isinstance(config[section], dict):
-                for key, value in config[section].items():
-                    if isinstance(value, str) and value.startswith('${') and value.endswith('}'):
-                        env_var = value[2:-1]
-                        if env_var in os.environ:
-                            config[section][key] = os.environ[env_var]
+        # Recursively substitute environment variables
+        config = _recursive_substitute(config, os.environ)
 
+    print(f"DEBUG [load_config]: Final config after substitution: {config}")
     return config
 
 def parse_args():

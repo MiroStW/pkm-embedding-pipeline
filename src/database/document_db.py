@@ -42,28 +42,56 @@ class DocumentTracker:
         try:
             # Use the improved database initialization
             conn, cursor = init_db_sqlite()
-            conn.close()
-            logger.debug("Database initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing database: {e}")
-            # Fallback to basic initialization if the improved one fails
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            # Create documents table
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS documents (
-                path TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                last_modified TIMESTAMP,
-                last_processed TIMESTAMP,
-                metadata TEXT,
-                error TEXT
-            )
-            ''')
+            # Verify schema from init_db_sqlite if possible, or ensure fallback matches
+            cursor.execute("PRAGMA table_info(documents)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'path' not in columns:
+                 logger.warning("init_db_sqlite did not create 'path' column. Falling back or ensuring schema match.")
+                 # Ensure fallback schema is correct
+                 self._ensure_schema(cursor)
+            else:
+                 logger.debug("Database schema from init_db_sqlite seems okay.")
 
             conn.commit()
             conn.close()
+            logger.debug("Database initialized successfully via init_db_sqlite")
+        except Exception as e:
+            logger.error(f"Error using init_db_sqlite: {e}. Falling back to basic initialization.")
+            # Fallback to basic initialization
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            self._ensure_schema(cursor)
+            conn.commit()
+            conn.close()
+            logger.info("Database initialized using basic fallback.")
+
+    def _ensure_schema(self, cursor):
+        """Ensure the necessary table and columns exist."""
+        logger.debug("Ensuring database schema...")
+        # Create documents table if it doesn't exist - ensure all columns are present
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS documents (
+            path TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            last_modified TIMESTAMP,
+            last_processed TIMESTAMP,
+            metadata TEXT,
+            error TEXT,
+            file_hash TEXT,  -- Added based on init_db.py
+            processing_time REAL -- Added based on init_db.py
+        )
+        ''')
+        logger.debug("'documents' table checked/created.")
+
+        # Example: Add missing columns if necessary (more robust than just create)
+        cursor.execute("PRAGMA table_info(documents)")
+        existing_columns = [col[1] for col in cursor.fetchall()]
+        if 'file_hash' not in existing_columns:
+            logger.info("Adding missing column 'file_hash' to documents table.")
+            cursor.execute("ALTER TABLE documents ADD COLUMN file_hash TEXT")
+        if 'processing_time' not in existing_columns:
+            logger.info("Adding missing column 'processing_time' to documents table.")
+            cursor.execute("ALTER TABLE documents ADD COLUMN processing_time REAL")
 
     def mark_for_processing(self, file_path: str) -> bool:
         """

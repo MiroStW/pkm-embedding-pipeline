@@ -10,6 +10,9 @@ import random
 import time
 from dotenv import load_dotenv
 
+# Add the project root directory to PYTHONPATH
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

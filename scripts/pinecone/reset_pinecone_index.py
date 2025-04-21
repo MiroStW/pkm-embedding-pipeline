@@ -7,7 +7,6 @@ import sys
 import logging
 from dotenv import load_dotenv
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -15,8 +14,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def main():
-    """Delete and recreate the Pinecone index specified in environment variables."""
-    # Load environment variables
     load_dotenv()
 
     api_key = os.getenv('PINECONE_API_KEY')
@@ -38,6 +35,7 @@ def main():
         logger.info("Connecting to Pinecone...")
         pc = Pinecone(api_key=api_key)
         logger.info("Successfully connected to Pinecone")
+        logger.info(f"Using cloud_provider={cloud_provider}, region={region}")
 
         # Check if index exists
         indexes = pc.list_indexes().names()
@@ -53,7 +51,7 @@ def main():
             logger.info(f"Index '{index_name}' does not exist, nothing to delete.")
 
         # Create the index
-        logger.info(f"Creating index '{index_name}' with dimension {dimension}, metric {metric}, serverless={serverless}")
+        logger.info(f"Creating index '{index_name}' with dimension {dimension}, metric {metric}, serverless={serverless}, cloud_provider={cloud_provider}, region={region}")
         if serverless:
             pc.create_index(
                 name=index_name,

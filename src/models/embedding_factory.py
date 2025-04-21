@@ -1,13 +1,11 @@
 """
 Factory for creating embedding model instances.
 """
-import os
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from src.models.embedding_model import EmbeddingModel
 from src.models.sentence_transformers_embedding import SentenceTransformersEmbedding
-from src.models.mock_embedding_model import MockEmbeddingModel
 
 logger = logging.getLogger(__name__)
 
@@ -30,35 +28,16 @@ class EmbeddingModelFactory:
         """
         model_type = config.get("model_type", "e5").lower()
 
-        # Check for mock model first
-        if model_type == "mock":
-            logger.info("Creating mock embedding model for benchmarking")
-            dimension = config.get("dimension", 1024)
-            return MockEmbeddingModel(dimension=dimension)
+        # Only real embedding models are supported; error on unknown types
+        if model_type not in ("e5", "distiluse"):
+            logger.error(f"Unknown embedding model type: {model_type}; allowed types: 'e5', 'distiluse'")
+            raise ValueError(f"Unknown embedding model type: {model_type}; allowed types: 'e5', 'distiluse'")
 
-        # Try to create the requested model
-        try:
-            if model_type == "e5":
-                return await EmbeddingModelFactory._create_e5_model(config)
-            elif model_type == "distiluse":
-                return await EmbeddingModelFactory._create_fallback_model(config)
-            else:
-                logger.warning(f"Unknown model type: {model_type}, falling back to E5")
-                return await EmbeddingModelFactory._create_e5_model(config)
-        except Exception as e:
-            logger.error(f"Failed to create {model_type} model: {str(e)}")
-
-            # Try to create fallback model
-            try:
-                logger.info("Attempting to create fallback model")
-                return await EmbeddingModelFactory._create_fallback_model(config)
-            except Exception as fallback_error:
-                logger.error(f"Failed to create fallback model: {str(fallback_error)}")
-
-                # As a last resort, create mock model
-                logger.warning("All model creation attempts failed, using mock model")
-                dimension = config.get("dimension", 1024)
-                return MockEmbeddingModel(dimension=dimension)
+        # Create the requested model
+        if model_type == "e5":
+            return await EmbeddingModelFactory._create_e5_model(config)
+        # distiluse fallback
+        return await EmbeddingModelFactory._create_fallback_model(config)
 
     @staticmethod
     async def _create_e5_model(config: Dict[str, Any]) -> EmbeddingModel:

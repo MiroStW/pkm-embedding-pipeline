@@ -43,20 +43,24 @@ class SentenceTransformersEmbedding(EmbeddingModel):
             self.is_fallback = is_fallback
 
             # Configure device
-            if device is None:
+            resolved_device = device # Keep original config value if provided
+            if device is None or device == "auto":
                 if torch.backends.mps.is_available():
-                    device = "mps"  # Use M2 Max Neural Engine
+                    resolved_device = "mps"  # Use M2 Max Neural Engine
                 elif torch.cuda.is_available():
-                    device = "cuda"
+                    resolved_device = "cuda"
                 else:
-                    device = "cpu"
+                    resolved_device = "cpu"
+                logger.info(f"Auto-detected device: {resolved_device} (config was '{device}')")
+            else:
+                 logger.info(f"Using specified device: {resolved_device}")
 
-            self.device = device
-            logger.info(f"Using device: {device}")
+            self.device = resolved_device # Store the resolved device name
+            logger.info(f"Using device: {self.device}")
 
             # Initialize model
             self.model = SentenceTransformer(model_name)
-            self.model.to(device)
+            self.model.to(self.device) # Use the resolved device string here
 
             # Configure for E5 model specifics
             self.is_e5_model = "e5" in model_name.lower()
@@ -88,7 +92,7 @@ class SentenceTransformersEmbedding(EmbeddingModel):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
-    async def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def generate_embeddings(self, texts: List[str]) -> Optional[List[List[float]]]:
         """
         Generate embeddings for a list of text chunks.
 
@@ -96,7 +100,7 @@ class SentenceTransformersEmbedding(EmbeddingModel):
             texts: List of text chunks to embed
 
         Returns:
-            List of embedding vectors
+            List of embedding vectors, or None if an error occurred.
         """
         if not texts:
             return []
@@ -106,21 +110,29 @@ class SentenceTransformersEmbedding(EmbeddingModel):
             prepared_texts = [self._prepare_text(text) for text in texts]
 
             # Run embedding generation in a separate thread to not block the async loop
+            logger.debug(f"Encoding {len(prepared_texts)} texts with {self.model_name} on {self.device}")
             embeddings = await self._run_in_thread(
                 self.model.encode,
                 prepared_texts,
                 convert_to_numpy=True,
                 normalize_embeddings=True  # Built-in normalization
             )
+            logger.debug(f"Successfully encoded {len(prepared_texts)} texts.")
 
-            # Convert to list format
-            return [embedding.tolist() for embedding in embeddings]
+            # Convert to list format and check validity
+            result_embeddings = [emb.tolist() for emb in embeddings]
+            if not result_embeddings or len(result_embeddings) != len(texts):
+                 logger.error(f"Embedding result length mismatch or empty for model {self.model_name}")
+                 return None # Indicate error
+
+            return result_embeddings
 
         except Exception as e:
             logger.error(f"Error generating embeddings with model {self.model_name}: {str(e)}")
-            return [[] for _ in texts]
+            logger.exception("Full traceback for embedding generation error:") # Log full traceback
+            return None # Indicate error by returning None
 
-    async def generate_embedding(self, text: str) -> List[float]:
+    async def generate_embedding(self, text: str) -> Optional[List[float]]:
         """
         Generate embedding for a single text chunk.
 
@@ -128,13 +140,14 @@ class SentenceTransformersEmbedding(EmbeddingModel):
             text: Text to embed
 
         Returns:
-            Embedding vector
+            Embedding vector, or None if an error occurred.
         """
         if not text:
-            return []
+            return None # Return None for empty text
 
         embeddings = await self.generate_embeddings([text])
-        return embeddings[0] if embeddings else []
+        # Return the first embedding if successful, otherwise None
+        return embeddings[0] if embeddings and embeddings[0] else None
 
     async def generate_title_enhanced_embedding(self,
                                          title: str,

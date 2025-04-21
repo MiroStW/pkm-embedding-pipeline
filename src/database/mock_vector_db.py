@@ -23,7 +23,7 @@ class MockVectorDatabaseUploader:
         self.dimension = kwargs.get("dimension", 512)
         logger.info("Initialized MockVectorDatabaseUploader")
 
-    def upload_vectors(self, vectors: List[Dict[str, Any]]) -> Tuple[int, int]:
+    async def upload_vectors(self, vectors: List[Dict[str, Any]]) -> Tuple[int, int]:
         """
         Mock upload vectors.
 
@@ -42,7 +42,7 @@ class MockVectorDatabaseUploader:
 
         return count, 0
 
-    def upload_document_chunks(self,
+    async def upload_document_chunks(self,
                                document_id: str,
                                chunks: List[Dict[str, Any]],
                                embeddings: List[List[float]],
@@ -73,7 +73,7 @@ class MockVectorDatabaseUploader:
         logger.info(f"[MOCK] Uploaded {total_vectors} vectors for document {document_id}")
         return total_vectors, 0
 
-    def delete_document(self, document_id: str) -> bool:
+    async def delete_document(self, document_id: str) -> bool:
         """
         Mock delete document vectors.
 
@@ -87,27 +87,9 @@ class MockVectorDatabaseUploader:
         logger.info(f"[MOCK] Deleted vectors for document {document_id}")
         return True
 
-    def get_stats(self) -> Dict[str, Any]:
+    async def index_document(self, document_result: Dict[str, Any]) -> bool:
         """
-        Get mock statistics.
-
-        Returns:
-            Dictionary with mock statistics
-        """
-        return {
-            "dimension": self.dimension,
-            "total_vector_count": self.uploaded_vectors,
-            "namespaces": {},
-            "documents": {
-                "uploaded": len(self.uploaded_documents),
-                "deleted": len(self.deleted_documents)
-            }
-        }
-
-    def index_document(self, document_result: Dict[str, Any]) -> bool:
-        """
-        Mock implementation of index_document method.
-        Used by the pipeline orchestrator to process document results.
+        Mock index a document in the vector database.
 
         Args:
             document_result: Document processing result containing metadata and chunks
@@ -134,7 +116,7 @@ class MockVectorDatabaseUploader:
             mock_embeddings = [[0.1] * self.dimension for _ in range(len(chunks))]
 
             # Upload to mock database
-            success_count, error_count = self.upload_document_chunks(
+            success_count, error_count = await self.upload_document_chunks(
                 document_id=document_id,
                 chunks=chunks,
                 embeddings=mock_embeddings
@@ -146,3 +128,16 @@ class MockVectorDatabaseUploader:
         except Exception as e:
             logger.error(f"[MOCK] Error indexing document: {str(e)}")
             return False
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get mock database statistics.
+
+        Returns:
+            Dictionary with mock statistics
+        """
+        return {
+            "total_vectors": self.uploaded_vectors,
+            "total_documents": len(self.uploaded_documents),
+            "deleted_documents": len(self.deleted_documents)
+        }

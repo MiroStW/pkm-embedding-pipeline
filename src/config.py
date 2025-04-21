@@ -154,14 +154,39 @@ class ConfigManager:
         for key, value in config_dict.items():
             if isinstance(value, dict):
                 self._process_env_vars(value)
-            elif isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-                env_var = value[2:-1]
-                env_value = os.environ.get(env_var)
-                if env_value is not None:
-                    config_dict[key] = env_value
-                    logger.debug(f"Applied environment variable {env_var} to config key {key}")
-                else:
-                    logger.warning(f"Environment variable {env_var} not found")
+            elif isinstance(value, list):
+                # Process lists
+                for i, item in enumerate(value):
+                    if isinstance(item, dict):
+                        self._process_env_vars(item)
+                    elif isinstance(item, str):
+                        value[i] = self._substitute_env_var(item)
+            elif isinstance(value, str):
+                config_dict[key] = self._substitute_env_var(value)
+
+    def _substitute_env_var(self, value: str) -> str:
+        """
+        Replace environment variable references in the string with their values.
+
+        Args:
+            value: String that may contain environment variable references.
+
+        Returns:
+            String with environment variables replaced with their values.
+        """
+        def replace_env_var(match):
+            env_var_name = match.group(1)
+            env_var_value = os.environ.get(env_var_name)
+
+            if env_var_value is None:
+                logger.warning(f"Environment variable '{env_var_name}' not found")
+                return match.group(0)  # Return the original placeholder if variable not found
+
+            logger.debug(f"Substituted environment variable: {env_var_name}")
+            return env_var_value
+
+        # Use the same regex pattern defined at module level
+        return ENV_VAR_PATTERN.sub(replace_env_var, value)
 
     def get_embedding_config(self) -> Dict[str, Any]:
         """

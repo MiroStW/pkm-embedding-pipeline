@@ -9,12 +9,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python count_doc_vectors.py <document_id>")
-        sys.exit(1)
-
-    document_id = sys.argv[1]
-
     # Get Pinecone credentials from environment
     api_key = os.environ.get('PINECONE_API_KEY')
     environment = os.environ.get('PINECONE_ENVIRONMENT', 'gcp-starter')
@@ -29,8 +23,19 @@ def main():
         api_key=api_key,
         environment=environment,
         index_name=index_name,
-        dimension=1536
+        dimension=1024
     )
+
+    if len(sys.argv) < 2:
+        # List all document IDs
+        logger.info("No document ID provided. Listing all document IDs...")
+        document_ids = client.get_document_ids()
+        logger.info(f"Found {len(document_ids)} documents in Pinecone:")
+        for doc_id in document_ids:
+            logger.info(f"  - {doc_id}")
+        sys.exit(0)
+
+    document_id = sys.argv[1]
 
     # Query for vectors with the document ID
     vectors = client.query_vectors(

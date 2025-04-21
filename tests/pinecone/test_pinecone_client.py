@@ -50,8 +50,8 @@ def main():
             index_name=index_name,
             dimension=1536,  # OpenAI embedding dimension
             serverless=True,
-            cloud_provider="gcp",
-            region="us-west4"  # Free tier region
+            cloud_provider="aws",
+            region="us-east-1"  # Free tier region
         )
 
         # Check connection

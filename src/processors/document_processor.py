@@ -5,6 +5,8 @@ import os
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 import frontmatter
+import hashlib
+import json
 
 from .document_parser import DocumentParser
 from .chunking import SemanticChunker
@@ -48,8 +50,11 @@ class DocumentProcessor:
         Returns:
             Dictionary containing processed document data, including metadata and chunks
         """
+        print(f"DEBUG: DocumentProcessor START processing file: {file_path}")
+
         if not self._is_supported_file(file_path):
             logger.warning(f"Skipping unsupported file: {file_path}")
+            print(f"DEBUG: DocumentProcessor SKIPPED file: {file_path}")
             return {
                 'status': 'skipped',
                 'reason': 'unsupported_extension',
@@ -58,25 +63,87 @@ class DocumentProcessor:
 
         try:
             logger.info(f"Processing file: {file_path}")
+            logger.debug(f"File exists: {os.path.exists(file_path)}")
+            logger.debug(f"File size: {os.path.getsize(file_path)} bytes")
 
             # Read the file and extract frontmatter
-            with open(file_path, 'r', encoding='utf-8') as file:
-                content = file.read()
+            try:
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    content = file.read()
+                logger.debug(f"Successfully read file content, length: {len(content)} characters")
+            except Exception as e:
+                logger.error(f"Error reading file {file_path}: {str(e)}")
+                print(f"DEBUG: DocumentProcessor ERRORED reading file: {file_path}. Error: {str(e)}")
+                return {
+                    'status': 'error',
+                    'reason': f'file_read_error: {str(e)}',
+                    'file_path': file_path
+                }
 
-            post = frontmatter.loads(content)
-            raw_metadata = dict(post.metadata)
-            raw_content = post.content
+            try:
+                post = frontmatter.loads(content)
+                raw_metadata = dict(post.metadata)
+                raw_content = post.content
+                logger.debug(f"Successfully parsed frontmatter, metadata keys: {list(raw_metadata.keys())}")
+            except Exception as e:
+                logger.error(f"Error parsing frontmatter in {file_path}: {str(e)}")
+                print(f"DEBUG: DocumentProcessor ERRORED parsing frontmatter: {file_path}. Error: {str(e)}")
+                return {
+                    'status': 'error',
+                    'reason': f'frontmatter_parse_error: {str(e)}',
+                    'file_path': file_path
+                }
+
+            # Generate a stable document ID from the canonical path
+            try:
+                canonical_path = os.path.abspath(os.path.realpath(file_path))
+                document_id = hashlib.sha256(canonical_path.encode('utf-8')).hexdigest()
+                logger.debug(f"Generated document_id '{document_id}' for path '{canonical_path}'")
+            except Exception as id_e:
+                logger.error(f"Error generating document ID for {file_path}: {id_e}")
+                print(f"DEBUG: DocumentProcessor ERRORED generating document ID: {file_path}. Error: {str(id_e)}")
+                return {
+                    'status': 'error',
+                    'reason': f'document_id_generation_error: {str(id_e)}',
+                    'file_path': file_path
+                }
 
             # Extract and process metadata
-            metadata = self.metadata_extractor.extract_metadata(raw_metadata, raw_content, file_path)
+            try:
+                metadata = self.metadata_extractor.extract_metadata(raw_metadata, raw_content, file_path)
+                # Add the generated document_id to the metadata
+                metadata['document_id'] = document_id
+                # Also ensure file_path is stored if not already
+                if 'file_path' not in metadata:
+                    metadata['file_path'] = file_path
+
+                logger.debug(f"Successfully extracted metadata (including document_id): {metadata}")
+            except Exception as e:
+                logger.error(f"Error extracting metadata from {file_path}: {str(e)}")
+                print(f"DEBUG: DocumentProcessor ERRORED extracting metadata: {file_path}. Error: {str(e)}")
+                return {
+                    'status': 'error',
+                    'reason': f'metadata_extraction_error: {str(e)}',
+                    'file_path': file_path
+                }
 
             # Create semantic chunks
-            chunks = self.chunker.chunk_document(raw_content, metadata)
+            try:
+                chunks = self.chunker.chunk_document(raw_content, metadata)
+                logger.debug(f"Successfully created {len(chunks)} chunks")
+            except Exception as e:
+                logger.error(f"Error creating chunks for {file_path}: {str(e)}")
+                print(f"DEBUG: DocumentProcessor ERRORED creating chunks: {file_path}. Error: {str(e)}")
+                return {
+                    'status': 'error',
+                    'reason': f'chunking_error: {str(e)}',
+                    'file_path': file_path
+                }
 
             # Update metadata with chunk count
             metadata['chunk_count'] = len(chunks)
 
-            # Prepare result
+            # Prepare result (metadata already includes document_id)
             result = {
                 'status': 'success',
                 'file_path': file_path,
@@ -84,11 +151,23 @@ class DocumentProcessor:
                 'chunks': chunks
             }
 
+            # DEBUG: Log the final metadata being returned
+            try:
+                metadata_json = json.dumps(metadata, indent=2, default=str)
+                print(f"DEBUG [DocumentProcessor]: Final metadata for {file_path}:\n{metadata_json}")
+            except Exception as json_e:
+                print(f"DEBUG [DocumentProcessor]: Failed to serialize metadata for logging: {json_e}")
+
             logger.info(f"Successfully processed {file_path}: {len(chunks)} chunks created")
+            logger.debug(f"Final result: {result}")
+            print(f"DEBUG: DocumentProcessor FINISHED processing file: {file_path}. Status: {result.get('status')}")
             return result
 
         except Exception as e:
             logger.error(f"Error processing file {file_path}: {str(e)}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            print(f"DEBUG: DocumentProcessor ERRORED processing file: {file_path}. Error: {str(e)}")
 
             # Return error information
             return {

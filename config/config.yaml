@@ -10,7 +10,7 @@ database:
     api_key: "${PINECONE_API_KEY}"
     environment: "${PINECONE_ENVIRONMENT}"
     index_name: "${PINECONE_INDEX_NAME}"
-    dimension: 1536
+    dimension: 1024
     max_retries: 3
     retry_delay: 2.0
     batch_size: 100
@@ -24,11 +24,11 @@ embedding:
   # Model type: "e5" (primary) or "distiluse" (fallback)
   model_type: e5
 
-  # Primary embedding model (E5)
-  primary_model: intfloat/multilingual-e5-small
+  # Primary model (E5)
+  primary_model: intfloat/e5-large-v2
 
-  # Fallback embedding model (DistilUSE)
-  fallback_model: sentence-transformers/distiluse-base-multilingual-cased-v1
+  # Fallback model (E5 smaller)
+  fallback_model: intfloat/e5-base-v2
 
   # Hardware optimization
   device: auto # can be cpu, cuda, mps, or auto
@@ -39,6 +39,9 @@ embedding:
 
 # Processing Configuration
 processing:
+  # Input directories to process
+  input_dirs:
+    - "dummy-md-files"
   # Supported file extensions
   include_patterns:
     - "*.md"
@@ -74,7 +77,7 @@ pipeline:
   # Minimum number of files per worker before scaling up
   min_files_per_worker: 10
   # Enable/disable adaptive scaling based on system load
-  enable_adaptive_scaling: true
+  enable_adaptive_scaling: false
   # Target CPU usage percentage for adaptive scaling (0-100)
   target_cpu_usage: 70
   # Memory threshold percentage for scaling back (0-100)

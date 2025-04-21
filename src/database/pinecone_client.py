@@ -4,9 +4,13 @@ Provides specialized functionality for managing vectors in Pinecone.
 """
 import logging
 import time
-import uuid
-from typing import List, Dict, Any, Optional, Tuple, Union
 from pinecone import Pinecone, ServerlessSpec, PodSpec
+import asyncio
+from typing import List, Dict, Any, Optional, Tuple
+import traceback
+import re
+import json
+import datetime
 
 from src.database.vector_db import VectorDatabaseUploader
 
@@ -28,7 +32,7 @@ class PineconeClient(VectorDatabaseUploader):
                  batch_size: int = 100,
                  serverless: bool = False,
                  cloud_provider: str = "aws",
-                 region: str = "us-west-2"):
+                 region: str = "us-east-1"):
         """
         Initialize the Pinecone client.
 
@@ -71,6 +75,9 @@ class PineconeClient(VectorDatabaseUploader):
             if self.index_name not in existing_indexes:
                 logger.info(f"Creating Pinecone index '{self.index_name}' with dimension {self.dimension}")
 
+                # DEBUG: Print the index name right before creating
+                print(f"DEBUG [_init_connection]: Attempting to create index with name: '{self.index_name}'")
+
                 # Create the index with appropriate specs
                 if self.serverless:
                     # Use serverless spec
@@ -108,6 +115,7 @@ class PineconeClient(VectorDatabaseUploader):
 
         except Exception as e:
             logger.error(f"Error connecting to Pinecone: {str(e)}")
+            logger.error(traceback.format_exc())
             raise
 
     def check_connection(self) -> bool:
@@ -439,7 +447,7 @@ class PineconeClient(VectorDatabaseUploader):
             return f"{document_id}_{chunk_index}_enhanced"
         return f"{document_id}_{chunk_index}"
 
-    def delete_document(self, document_id: str) -> bool:
+    async def delete_document(self, document_id: str) -> bool:
         """
         Delete all vectors associated with a document.
 
@@ -499,3 +507,355 @@ class PineconeClient(VectorDatabaseUploader):
         except Exception as e:
             logger.error(f"Error deleting document {document_id}: {str(e)}")
             return False
+
+    async def index_document(self, document_result: Dict[str, Any]) -> bool:
+        """
+        Index a document in Pinecone.
+        Used by the pipeline orchestrator to process document results.
+
+        Args:
+            document_result: Document processing result containing metadata and chunks
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if document_result.get('status') != 'success':
+                logger.error(f"Cannot index document with status: {document_result.get('status')}")
+                return False
+
+            # Look for 'document_id' in metadata
+            document_id = document_result.get('metadata', {}).get('document_id')
+            if not document_id:
+                logger.error("Document result metadata has no 'document_id', cannot index")
+                # Log the metadata for debugging
+                logger.debug(f"Metadata received: {document_result.get('metadata')}")
+                return False
+
+            logger.info(f"Processing document with ID: {document_id}") # Log the ID being used
+
+            chunks = document_result.get('chunks', [])
+            if not chunks:
+                logger.warning(f"Document {document_id} has no chunks to index")
+                return False
+
+            # Get embedding config
+            from src.config import ConfigManager
+            config_manager = ConfigManager()
+            embedding_config = config_manager.get_embedding_config()
+            logger.debug(f"Using embedding config: {embedding_config}")
+
+            logger.info(f"Creating embedding model for document {document_id}")
+            try:
+                # Create embedding model
+                from src.models import EmbeddingModelFactory
+                embedding_model = await EmbeddingModelFactory.create_model(embedding_config)
+                logger.debug("Successfully created embedding model")
+            except Exception as e:
+                logger.error(f"Failed to create embedding model: {str(e)}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return False
+
+            # Generate content embeddings
+            content_texts = [chunk.get('content', '') for chunk in chunks]
+            logger.info(f"Generating {len(content_texts)} regular embeddings for document {document_id}")
+            print(f"DEBUG [index_document]: About to generate {len(content_texts)} embeddings for {document_id}") # DEBUG PRINT
+
+            try:
+                embeddings = await embedding_model.generate_embeddings(content_texts)
+                # Explicitly check if embeddings generation returned None (indicating an error)
+                if embeddings is None:
+                    logger.error(f"Embedding generation failed for document {document_id}, received None.")
+                    print(f"DEBUG [index_document]: Embedding generation returned None for {document_id}, returning False") # DEBUG PRINT
+                    return False
+
+                logger.info(f"Generated {len(embeddings)} regular embeddings for document {document_id}")
+                print(f"DEBUG [index_document]: Successfully generated {len(embeddings)} embeddings for {document_id}") # DEBUG PRINT
+                # Check if embeddings list is empty or contains invalid items (e.g., empty lists if model returned them despite the fix)
+                if not embeddings or not all(embeddings):
+                    logger.error(f"Generated empty or invalid embeddings for document {document_id}")
+                    print(f"DEBUG [index_document]: Generated empty/invalid embeddings for {document_id}, returning False") # DEBUG PRINT
+                    return False
+
+            except Exception as e:
+                logger.error(f"Error generating embeddings for document {document_id}: {str(e)}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                print(f"DEBUG [index_document]: Exception during embedding generation for {document_id}: {e}") # DEBUG PRINT
+                return False
+
+            # Check if title-enhanced embeddings are enabled
+            title_enhanced_embeddings = None
+            if embedding_config.get('enable_title_enhanced', True):
+                logger.info(f"Title-enhanced embeddings are enabled with weight {embedding_config.get('title_weight', 0.3)}")
+                # Generate title-enhanced embeddings
+                title_weight = embedding_config.get('title_weight', 0.3)
+
+                # Prepare batch input for title-enhanced embeddings
+                enhanced_batch = []
+                for i, chunk in enumerate(chunks):
+                    title = chunk.get('metadata', {}).get('section_title', '') or document_result.get('metadata', {}).get('title', '')
+                    content = chunk.get('content', '')
+
+                    if title and content:
+                        enhanced_batch.append({
+                            'title': title,
+                            'content': content,
+                            'index': i
+                        })
+
+                # Generate title-enhanced embeddings in batch if we have any
+                if enhanced_batch:
+                    logger.info(f"Generating {len(enhanced_batch)} title-enhanced embeddings for document {document_id}")
+
+                    # Process the batch more efficiently
+                    title_enhanced_embeddings = [None] * len(chunks)
+
+                    # Process in smaller batches to avoid memory issues (optional)
+                    batch_size = 10  # Adjust based on available memory
+                    for i in range(0, len(enhanced_batch), batch_size):
+                        batch_slice = enhanced_batch[i:i + batch_size]
+                        logger.info(f"Processing batch {i//batch_size + 1}/{(len(enhanced_batch) + batch_size - 1)//batch_size} of title-enhanced embeddings")
+
+                        # Generate embeddings for this batch slice
+                        for item in batch_slice:
+                            try:
+                                enhanced = await embedding_model.generate_title_enhanced_embedding(
+                                    title=item['title'],
+                                    content=item['content'],
+                                    title_weight=title_weight
+                                )
+                                title_enhanced_embeddings[item['index']] = enhanced
+                            except Exception as e:
+                                logger.error(f"Error generating enhanced embedding for chunk {item['index']}: {str(e)}")
+                                # Use regular embedding as fallback
+                                if item['index'] < len(embeddings):
+                                    title_enhanced_embeddings[item['index']] = embeddings[item['index']]
+
+                    # Fill in any missing title-enhanced embeddings with regular embeddings
+                    missing_count = sum(1 for x in title_enhanced_embeddings if x is None)
+                    if missing_count > 0:
+                        logger.info(f"Filling in {missing_count} missing title-enhanced embeddings with regular embeddings")
+
+                    for i in range(len(chunks)):
+                        if title_enhanced_embeddings[i] is None:
+                            title_enhanced_embeddings[i] = embeddings[i]
+                else:
+                    logger.info(f"No titles found for document {document_id}, using regular embeddings")
+                    # No titles available, use regular embeddings
+                    title_enhanced_embeddings = embeddings
+                # Add a print after title enhanced generation completes or is skipped
+                print(f"DEBUG [index_document]: Finished title-enhanced embedding step for {document_id}") # DEBUG PRINT
+            else:
+                logger.info(f"Title-enhanced embeddings are disabled for document {document_id}")
+                print(f"DEBUG [index_document]: Title-enhanced embeddings disabled for {document_id}") # DEBUG PRINT
+
+            # Ensure we fall back correctly if title enhancement was enabled but failed
+            if embedding_config.get('enable_title_enhanced', True) and title_enhanced_embeddings is None:
+                logger.warning(f"Title enhanced was enabled but result is None for {document_id}, falling back to regular embeddings.")
+                print(f"DEBUG [index_document]: Falling back title_enhanced to regular embeddings for {document_id}") # DEBUG PRINT
+                title_enhanced_embeddings = embeddings
+
+            # Upload to Pinecone
+            logger.info(f"Uploading document {document_id} with {len(embeddings)} regular embeddings and {len(title_enhanced_embeddings) if title_enhanced_embeddings else 0} title-enhanced embeddings")
+            print(f"DEBUG [index_document]: About to call upload_document_chunks for document {document_id}") # DEBUG PRINT
+            try:
+                success_count, error_count = await self.upload_document_chunks(
+                    document_id=document_id,
+                    chunks=chunks,
+                    embeddings=embeddings,
+                    title_enhanced_embeddings=title_enhanced_embeddings
+                )
+
+                if error_count > 0:
+                    logger.warning(f"Indexed document {document_id} with {error_count} errors")
+
+                return success_count > 0
+            except Exception as e:
+                logger.error(f"Error uploading document chunks: {str(e)}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error indexing document: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return False
+
+    async def upload_document_chunks(self,
+                               document_id: str,
+                               chunks: List[Dict[str, Any]],
+                               embeddings: List[List[float]],
+                               title_enhanced_embeddings: Optional[List[List[float]]] = None) -> Tuple[int, int]:
+        """
+        Upload document chunks to Pinecone.
+
+        Args:
+            document_id: The unique ID of the document
+            chunks: List of document chunks
+            embeddings: List of embeddings corresponding to chunks
+            title_enhanced_embeddings: Optional list of title-enhanced embeddings
+
+        Returns:
+            Tuple of (success_count, error_count)
+        """
+        if len(chunks) != len(embeddings):
+            logger.error(f"Mismatch between chunks ({len(chunks)}) and embeddings ({len(embeddings)})")
+            return 0, len(chunks)
+
+        if title_enhanced_embeddings and len(title_enhanced_embeddings) != len(chunks):
+            logger.error(f"Mismatch between chunks ({len(chunks)}) and title-enhanced embeddings ({len(title_enhanced_embeddings)})")
+            return 0, len(chunks)
+
+        # PRINT THE RECEIVED document_id
+        print(f"DEBUG [upload_document_chunks]: Received document_id: '{document_id}'")
+
+        # Prepare vectors for upload
+        vectors = []
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            # Get raw file name for metadata
+            raw_file_name = chunk.get("metadata", {}).get("file_name", "unknown_file")
+
+            # Create unique vector ID using the main document_id and chunk index
+            # Ensure document_id itself is safe (should be, if generated correctly)
+            # Let's assume document_id is already clean (e.g., UUID, hash)
+            vector_id = f"doc-{document_id}-chunk-{i}"
+
+            # Prepare metadata - ensure raw file_name is included for reference
+            metadata = {
+                "document_id": document_id, # Main document ID
+                "chunk_index": i,
+                "content": chunk.get("content", ""),
+                # Include original metadata, ensuring file_name is present
+                **chunk.get("metadata", {})
+            }
+            if "file_name" not in metadata:
+                 metadata["file_name"] = raw_file_name # Store raw name for filtering
+
+            # --- Sanitize metadata for Pinecone compatibility ---
+            sanitized_metadata = {}
+            for key, value in metadata.items():
+                # 1. Sanitize the key (replace space with _, remove other invalid chars)
+                sanitized_key = key.replace(' ', '_')
+                sanitized_key = re.sub(r'[^a-zA-Z0-9_-]', '', sanitized_key)
+
+                # Ensure key is not empty after sanitization
+                if not sanitized_key:
+                    logger.warning(f"Skipping metadata field with original key '{key}' because key became empty after sanitization (doc {document_id})")
+                    continue
+
+                # 2. Skip if the value is None
+                if value is None:
+                    logger.debug(f"Skipping metadata field '{sanitized_key}' because its value is None (doc {document_id})")
+                    continue
+
+                # 3. Sanitize the value based on allowed types
+                if isinstance(value, (datetime.date, datetime.datetime)):
+                    sanitized_value = value.isoformat()
+                elif isinstance(value, (str, int, float, bool)):
+                    sanitized_value = value # Keep allowed scalar types
+                elif isinstance(value, list):
+                    # Ensure list contains only strings (as per error message)
+                    string_list = []
+                    valid_list = True
+                    for item in value:
+                        if isinstance(item, str):
+                            string_list.append(item)
+                        else:
+                            # Convert non-strings to strings
+                            logger.warning(f"Converting non-string item {type(item)} in list for key '{sanitized_key}' to string (doc {document_id})")
+                            string_list.append(str(item))
+                    sanitized_value = string_list
+                elif isinstance(value, dict):
+                    # Convert dicts to JSON strings as they might not be supported directly
+                    logger.warning(f"Converting dict metadata type to JSON string for key '{sanitized_key}' (doc {document_id})")
+                    try:
+                        sanitized_value = json.dumps(value)
+                    except Exception:
+                        logger.error(f"Could not convert dict to JSON string for key '{sanitized_key}', converting to basic string.")
+                        sanitized_value = str(value) # Fallback
+                else:
+                    # Convert any other unsupported types to string as a fallback
+                    logger.warning(f"Converting unsupported metadata type {type(value)} to string for key '{sanitized_key}' (doc {document_id})")
+                    sanitized_value = str(value)
+
+                # Add the sanitized key and value
+                sanitized_metadata[sanitized_key] = sanitized_value
+            # ----------------------------------------------------
+
+            # Add regular embedding vector with sanitized metadata
+            vectors.append({
+                "id": vector_id,
+                "values": embedding,
+                "metadata": sanitized_metadata
+            })
+
+            # Add title-enhanced embedding if available
+            if title_enhanced_embeddings:
+                enhanced_id = f"doc-{document_id}-chunk-{i}-enhanced" # Consistent naming
+                # Use the already sanitized metadata, just add the flag
+                enhanced_metadata = {**sanitized_metadata, "is_title_enhanced": True}
+
+                vectors.append({
+                    "id": enhanced_id,
+                    "values": title_enhanced_embeddings[i],
+                    "metadata": enhanced_metadata
+                })
+
+        # Upload vectors in batches
+        success_count = 0
+        error_count = 0
+
+        for i in range(0, len(vectors), self.batch_size):
+            batch = vectors[i:i + self.batch_size]
+            logger.debug(f"Uploading batch {i//self.batch_size + 1}/{(len(vectors) + self.batch_size - 1)//self.batch_size} for document {document_id}")
+            print(f"DEBUG: Preparing to upload batch {i//self.batch_size + 1} for doc {document_id}. Batch size: {len(batch)}")
+
+            # PRINT THE BATCH CONTENT JUST BEFORE UPSERT
+            # Use json.dumps for cleaner multi-line printing, handle potential non-serializable data gracefully
+            try:
+                # Create a copy of the batch to modify for printing
+                batch_copy_for_print = []
+                for vector_data in batch:
+                    vector_copy = vector_data.copy()
+                    if 'values' in vector_copy:
+                        vector_copy['values'] = f"<embedding vector of dim {len(vector_copy['values']) if isinstance(vector_copy['values'], list) else 'unknown'}>"
+                    batch_copy_for_print.append(vector_copy)
+
+                batch_json = json.dumps(batch_copy_for_print, indent=2, default=lambda o: '<not serializable>')
+                print(f"DEBUG [upload_document_chunks]: Batch content before upsert (batch {i//self.batch_size + 1}):\n{batch_json}")
+            except Exception as json_e:
+                print(f"DEBUG [upload_document_chunks]: Could not serialize/modify batch for printing: {json_e}")
+                # Fallback to printing limited raw info if modification fails
+                print(f"DEBUG [upload_document_chunks]: Batch content (raw, limited): {[v.get('id') for v in batch]}")
+
+            try:
+                # Upload batch with retries using asyncio.to_thread for the sync call
+                for attempt in range(self.max_retries):
+                    try:
+                        print(f"DEBUG: Attempting upsert (Attempt {attempt + 1}/{self.max_retries}) for batch {i//self.batch_size + 1}")
+                        # Run the synchronous upsert in a thread
+                        upsert_response = await asyncio.to_thread(
+                            self.index.upsert,
+                            vectors=batch
+                        )
+                        print(f"DEBUG: Upsert successful for batch {i//self.batch_size + 1}. Response: {upsert_response}")
+                        success_count += upsert_response.upserted_count if hasattr(upsert_response, 'upserted_count') else len(batch) # Use response count if available
+                        break # Exit retry loop on success
+                    except Exception as e:
+                        print(f"DEBUG: Upsert FAILED (Attempt {attempt + 1}) for batch {i//self.batch_size + 1}. Error: {str(e)}")
+                        if attempt < self.max_retries - 1:
+                            logger.warning(f"Upload attempt {attempt + 1} failed for batch {i//self.batch_size + 1}: {str(e)}, retrying...")
+                            # Use asyncio.sleep in async function
+                            await asyncio.sleep(self.retry_delay * (attempt + 1))
+                        else:
+                            # Log final failure and raise to be caught by the outer try/except
+                            logger.error(f"Final upload attempt {attempt + 1} failed for batch {i//self.batch_size + 1}: {str(e)}")
+                            raise e # Re-raise the exception after final retry failure
+
+            except Exception as e:
+                print(f"DEBUG: FINAL FAILURE for batch {i//self.batch_size + 1} after retries. Error: {str(e)}")
+                logger.error(f"Failed to upload batch {i//self.batch_size + 1} for document {document_id}: {str(e)}")
+                error_count += len(batch) # Increment error count for the entire failed batch
+
+        print(f"DEBUG: Finished uploading chunks for document {document_id}. Success: {success_count}, Errors: {error_count}")
+        logger.info(f"Finished uploading {success_count} vectors for document {document_id} ({error_count} errors).")
+        return success_count, error_count
